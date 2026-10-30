@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FNAF 2 MP — Animatrónico</title>
+    <style>
+        html { -webkit-user-select: none; user-select: none; overflow: hidden; height: 100%; }
+        body {
+            margin: 0; height: 100%; background: #050507; color: #cfcfcf;
+            font-family: monospace;
+        }
+
+        /* fondo CRT con grano + scanlines */
+        #crt {
+            position: fixed; inset: 0; pointer-events: none; z-index: 40;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px);
+            mix-blend-mode: multiply;
+        }
+        #grain {
+            position: fixed; inset: -50%; pointer-events: none; z-index: 39; opacity: .06;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.9'/%3E%3C/svg%3E");
+            animation: grainmove 0.9s steps(4) infinite;
+        }
+        @keyframes grainmove { 0%{transform:translate(0,0)} 25%{transform:translate(-8px,6px)} 50%{transform:translate(6px,-8px)} 75%{transform:translate(-4px,-4px)} 100%{transform:translate(0,0)} }
+
+        /* HUD superior */
+        #hud {
+            position: fixed; top: 10px; left: 10px; right: 10px; z-index: 50;
+            display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap;
+        }
+        .hbox {
+            background: rgba(8,10,16,.82); border: 1px solid #23262e; padding: 6px 12px;
+            display: flex; gap: 10px; align-items: center;
+            clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+        }
+        #role-icon { width: 44px; height: 44px; object-fit: contain; }
+        .rname { font-weight: bold; font-size: 15px; letter-spacing: 2px; }
+        .rplayer { font-size: 12px; color: #8f96a3; }
+        #h-hour { font-size: 20px; font-weight: bold; color: #ffd34d; }
+        #h-night { font-size: 12px; color: #8f96a3; }
+        #h-box { font-size: 12px; color: #e8d6fe; }
+        #boxbar { width: 90px; height: 8px; background: #1a1020; border: 1px solid #3a2a4a; }
+        #boxfill { height: 100%; background: #e8d6fe; width: 100%; }
+
+        /* sala actual */
+        #roomname {
+            position: fixed; top: 76px; left: 10px; z-index: 50;
+            background: rgba(8,10,16,.82); border-left: 3px solid #ffd34d; padding: 8px 14px;
+            font-size: 15px; letter-spacing: 1px;
+        }
+
+        /* banner de oficina */
+        #doorbanner {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 60; display: none; text-align: center;
+            background: rgba(20,0,0,.88); border: 2px solid #ff5d5d; padding: 16px 28px;
+            font-size: 18px; font-weight: bold; color: #ffdede; letter-spacing: 2px;
+        }
+        #doorbanner .sub { font-size: 13px; color: #d0a0a0; margin-top: 6px; font-weight: normal; }
+
+        /* aturdimiento */
+        #stunbar {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 61; display: none; text-align: center;
+            background: rgba(0,10,30,.9); border: 2px solid #7ec8ff; padding: 16px 28px;
+            font-size: 18px; font-weight: bold; color: #cfe8ff; letter-spacing: 2px;
+        }
+
+        /* mapa */
+        #mapwrap {
+            position: fixed; right: 10px; top: 76px; z-index: 50;
+            background: rgba(8,10,16,.85); border: 1px solid #23262e; padding: 10px;
+        }
+        #maptitle { font-size: 10px; color: #667; letter-spacing: 2px; margin-bottom: 6px; }
+        #minimap { position: relative; width: 300px; height: 220px; background: #07090d; }
+        .mroom {
+            position: absolute; border: 1px solid #2c3140; background: #0d1017;
+            font-size: 9px; color: #7d8494; display: flex; align-items: center; justify-content: center;
+            text-align: center; padding: 2px; line-height: 1.15; overflow: hidden;
+        }
+        .mroom.me { border-color: #ffd34d; background: #1d1a08; color: #ffd34d; box-shadow: 0 0 10px rgba(255,211,77,.35); }
+        .mroom.mate { border-color: #3a6a9a; }
+
+        /* navegación */
+        #nav { position: fixed; bottom: 64px; left: 10px; right: 10px; z-index: 55; display: flex; flex-wrap: wrap; gap: 8px; }
+        #nav button {
+            font-family: monospace; font-weight: bold; font-size: 13px; letter-spacing: 1px;
+            background: rgba(14,18,26,.9); color: #cfd6e4; border: 1px solid #2c3140;
+            padding: 10px 14px; cursor: pointer; position: relative; overflow: hidden;
+            clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+        }
+        #nav button:hover:not(:disabled) { border-color: #ffd34d; color: #ffd34d; }
+        #nav button:disabled { opacity: .35; cursor: default; }
+        #nav button .arrow { color: #7d8494; margin-right: 6px; }
+        #nav button.attack { border-color: #ff5d5d; color: #ffdede; }
+        #nav button.attack:hover:not(:disabled) { background: rgba(60,0,0,.9); border-color: #ff8a8a; }
+
+        /* habilidades */
+        #abilities { position: fixed; bottom: 10px; left: 10px; z-index: 55; display: flex; gap: 10px; }
+        .ab {
+            font-family: monospace; background: rgba(14,18,26,.9); color: #cfd6e4;
+            border: 1px solid #2c3140; padding: 10px 16px; cursor: pointer; text-align: left;
+            clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+        }
+        .ab:hover:not(:disabled) { border-color: #ffd34d; }
+        .ab:disabled { opacity: .35; cursor: default; }
+        .ab .l1 { font-weight: bold; font-size: 13px; letter-spacing: 1px; }
+        .ab .cd { display: block; font-size: 11px; color: #7d8494; margin-top: 2px; }
+
+        /* compañeros */
+        #mates {
+            position: fixed; bottom: 64px; right: 10px; z-index: 50;
+            background: rgba(8,10,16,.8); border: 1px solid #23262e; padding: 8px 10px;
+            font-size: 11px; color: #8f96a3; max-width: 220px;
+        }
+        #mates .mk { color: #cfd6e4; font-weight: bold; }
+
+        /* toast */
+        #toast {
+            position: fixed; top: 130px; left: 50%; transform: translateX(-50%);
+            z-index: 70; display: none; background: rgba(0,0,0,.85);
+            border: 1px solid #5a4a1a; color: #ffd34d; padding: 8px 18px; font-size: 14px;
+            pointer-events: none; max-width: 80vw; text-align: center;
+        }
+
+        /* pantallas */
+        #screen {
+            position: fixed; inset: 0; z-index: 80; display: none;
+            background: #030304; color: #cfcfcf; text-align: center;
+            padding-top: 18vh; font-size: 20px; letter-spacing: 2px;
+        }
+        #screen .big { font-size: 34px; font-weight: bold; margin: 18px 0; }
+        #screen .win .big { color: #ffd34d; }
+        #screen .lose .big { color: #ff5d5d; }
+        #screen .sub { font-size: 14px; color: #8f96a3; margin-top: 8px; }
+    </style>
+</head>
+
+<body>
+    <div id="grain"></div>
+    <div id="crt"></div>
+
+    <div id="hud">
+        <div class="hbox">
+            <img id="role-icon" src="assets/roles/guard.png" alt="">
+            <div>
+                <div class="rname" id="role-name">—</div>
+                <div class="rplayer" id="role-player">—</div>
+            </div>
+        </div>
+        <div class="hbox">
+            <span id="h-hour">--:--</span>
+            <span id="h-night">NOCHE -</span>
+        </div>
+        <div class="hbox" id="hb-box">
+            <span id="h-box">CAJA ♪</span>
+            <div id="boxbar"><div id="boxfill"></div></div>
+        </div>
+    </div>
+
+    <div id="roomname">—</div>
+    <div id="doorbanner"></div>
+    <div id="stunbar"></div>
+
+    <div id="mapwrap">
+        <div id="maptitle">MAPA · TU POSICIÓN EN DORADO</div>
+        <div id="minimap"></div>
+    </div>
+
+    <div id="nav"></div>
+
+    <div id="abilities">
+        <button class="ab" id="ab-jump">
+            <span class="l1">[ESP] JUMPSCARE</span>
+            <span class="cd" id="cd-jump">solo en la OFICINA</span>
+        </button>
+        <button class="ab" id="ab-puppet" style="display:none">
+            <span class="l1">[E] ¡SAL DE LA CAJA!</span>
+            <span class="cd" id="cd-puppet">cuando esté agotada</span>
+        </button>
+    </div>
+
+    <div id="mates"></div>
+    <div id="toast"></div>
+    <div id="screen"></div>
+
+    <script>
+        // PeerJS con CDNs de respaldo
+        (function () {
+            var CDNS = [
+                'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js',
+                'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'
+            ];
+            function load(i) {
+                if (i >= CDNS.length) return;
+                var s = document.createElement('script');
+                s.src = CDNS[i];
+                s.onerror = function () { load(i + 1); };
+                document.head.appendChild(s);
+            }
+            load(0);
+        })();
+    </script>
+    <script src="net.js"></script>
+    <script src="anim-game.js?v=2"></script>
+</body>
+
+</html>
