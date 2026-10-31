@@ -1,27 +1,45 @@
 // ============================================================
-// THE LOST PIZZERIA — Puente del GUARDIA (v4)
+// THE LOST PIZZERIA — Puente del GUARDIA (v5)
 // Se carga en 2/index.html SOLO cuando ?mp=<CODIGO> existe.
 // Sin el parámetro, el juego queda 100% original (un jugador).
 //
-// v4 (pantallas arregladas):
-//   · OFICINA VISIBLE: el sprite "blackout" del demo nace ROTO con el
-//     runtime 291 + datos 292 y cubre la pantalla de negro opaco. Se
-//     destierra fuera de pantalla cada 500ms — la oficina (escritorio,
-//     ventilador, pasillo) renderiza NATIVA y la linterna (CTRL) funciona.
-//   · CÁMARAS 100% OPERATIVAS (fix "NO SIGNAL"): el monitor nativo no
-//     dibuja sus vistas con 291+292 (pantalla blanca / signal out). Un
-//     overlay HTML sustituye la vista en vivo: imagen real de la sala
-//     (verificada del propio juego), ocupantes, mapa clicable para cambiar
-//     de cámara (escribe el contador nativo 'viewing') y botón para bajar
-//     el monitor. La CÁM 11 enseña la barra de la caja musical.
-//   · CAJA MUSICAL SIN MUERTE SORPRESA: sin marioneta jugadora ya NO hay
-//     kill a los 4s de caja vacía — hay AVISO + ventana de gracia (20s)
-//     para dar cuerda; solo si se sigue sin cuerda la IA la manda. Con
-//     marioneta jugadora el kill lo decide ella (igual que antes).
-//     Esto mata el bucle muerte→gameover→menú→reinicio que el guardia
-//     veía como "parpadeo negro constante".
-//   · Barra de la caja en ROJO PARPADEANTE por debajo del 25%.
-//
+// v5 (CÁMARAS ORIGINALES RESTAURADAS):
+//   · EL OVERLAY HTML DE CÁMARAS (v4) ELIMINADO: la vista que ve
+//     el guardia al subir el monitor es 100% DEL MOTOR ORIGINAL
+//     (sprite 'Active 16' con el bitmap nativo de cada sala).
+//   · CAUSA RAÍZ de la pantalla blanca: con el runtime 291 + datos
+//     292, tres sprites del monitor nacen torcidos y TAPAN la
+//     vista nativa:
+//       - 'white button' (544x74) se dibuja como RECTÁNGULO BLANCO
+//         que cubre toda la pantalla (como el 'blackout' de la
+//         oficina) → se destierra (patrón banishBlackout).
+//       - 'blip 2' + 'flip animation' (1024x768, ~13 instancias)
+//         son los overlays de transición del monitor que NUNCA se
+//         van: muestran el mapa "señal interrumpida" para siempre
+//         → se destierran y la vista de cámara queda expuesta.
+//       - 'Active 16' (la VISTA de cámara, 1600x768) queda oculto
+//         (rsFlags sin RSFLAG_VISIBLE) porque la secuencia nativa
+//         de despliegue no llega → se fuerza visible.
+//       - el body lleva el background CSS de la oficina → se quita
+//         mientras el monitor esté arriba y se repone al bajarlo.
+//   · El monitor se sube/baja con la franja inferior HTML (clic →
+//     botón nativo 'flip panel button'); el guion del demo cierra
+//     el monitor por su cuenta → el driver lo RE-ABRE mientras el
+//     guardia no lo haya bajado él.
+//   · Selección de cámara: mini-mapa HTML (solo mando) → clic →
+//     botón NATIVO 'cam N' del juego → la vista nativa cambia
+//     (verificado: 'cam 8' → Refacciones, 'cam 9' → Escenario).
+//     Tras cada movimiento de un animatrónico a la sala vigilada
+//     se re-pulsa la cámara para refrescar el frame.
+//   · ASOMADOS (bug de identidad): los sprites nativos 'bonnie',
+//     'chica', 'foxy', 'toy bonnie', 'BB'... (los animatrónicos
+//     asomando en el hall/oficina) nacen OCULTOS con 291+292. El
+//     driver muestra EL SPRITE DEL ROL que esté en el hall/oficina
+//     — el personaje renderizado coincide SIEMPRE con el
+//     seleccionado (bonnie es el conejo morado destrozado).
+//   · La caja musical nativa (CÁM 11: 'music button', textos y
+//     barra) solo se muestra al vigilar la CÁM 11, como en el
+//     juego original. El botón de cuerda sigue en la UI MP.
 // v3 (The Lost Pizzeria):
 //   · CORTINA MP sobre el menú nativo: el menú del demo es ilegible
 //     (sus textos no renderizan con el runtime 291 + datos 292) y
@@ -73,7 +91,7 @@
     const ROOM = params.get('mp');
     if (!ROOM) return; // un jugador: no hacer nada
 
-    const BRIDGE_VERSION = 'v4-pantallas-ok';
+    const BRIDGE_VERSION = 'v5-camaras-nativas';
     try { console.log('[MP] guard-bridge ' + BRIDGE_VERSION); } catch (e) { }
 
     const MY_NAME = params.get('name') || 'Guardia';
@@ -140,24 +158,66 @@
         puppet: 'LA MARIONETA', w_freddy: 'FREDDY DESTROZADO',
         w_bonnie: 'BONNIE DESTROZADO', w_chica: 'CHICA DESTROZADA', w_foxy: 'FOXY DESTROZADO'
     };
-    // v4: imágenes de sala VERIFICADAS del propio juego (banco de imágenes)
-    // para el overlay de cámaras del guardia
-    const ROLE_IMG = {
-        toy_freddy: 'toy_freddy.png', toy_bonnie: 'toy_bonnie.png', toy_chica: 'toy_chica.png',
-        mangle: 'toy_foxy.png', bb: 'BB.png', puppet: 'gold_freddy.png',
-        w_freddy: 'freddy.png', w_bonnie: 'bonnie.png', w_chica: 'chica.png', w_foxy: 'foxy.png'
+    // v5: LA VISTA DE CÁMARA ES 100% NATIVA (sprite 'Active 16').
+    // Solo hace falta un mini-mapa HTML como MANDO: sus botones
+    // disparan los botones NATIVOS 'cam N' del juego.
+    const CAM_BUTTON_NAME = {};
+    for (let n = 1; n <= 12; n++) {
+        // los anclas/botones nativos se llaman 'cam 01'...'cam 12'
+        CAM_BUTTON_NAME[n] = (n === 1) ? 'cam 01' : ('cam ' + n);
+    }
+    // mini-mapa: posición (%) de cada sala en el mando HTML
+    // (layout geográfico del mapa del juego)
+    const MAP_DOT = {
+        cam8: [7, 6], cam3: [7, 26], cam1: [7, 46], cam5: [7, 66],
+        hall1: [29, 26], hall2: [29, 46], office: [29, 66],
+        cam7: [52, 6], cam4: [52, 26], cam2: [52, 46], cam6: [52, 66],
+        cam9: [78, 6], cam11: [78, 26], cam10: [78, 46], cam12: [78, 66]
     };
-    const ROOM_IMG = {
-        cam1: 'assets/cams/cam01.jpg', cam2: 'assets/cams/cam02.jpg', cam3: 'assets/cams/cam03.jpg',
-        cam4: 'assets/cams/cam04.jpg', cam5: 'assets/cams/cam05.jpg', cam6: 'assets/cams/cam06.jpg',
-        cam7: 'assets/cams/cam07.jpg', cam8: 'assets/cams/cam08.jpg', cam9: 'assets/cams/cam09.jpg',
-        cam10: 'assets/cams/cam10.jpg', cam11: 'assets/cams/cam11.jpg', cam12: 'assets/cams/cam12.jpg'
+    // color del punto por rol (mismo código de colores que el cliente)
+    const ROLE_DOT_COLOR = {
+        toy_freddy: '#d9a86c', toy_bonnie: '#7ec8e3', toy_chica: '#ffd54d',
+        mangle: '#ff8a9e', bb: '#ff7043', puppet: '#e8d6fe',
+        w_freddy: '#8d6e4a', w_bonnie: '#9a7fd4', w_chica: '#b8a22e', w_foxy: '#a33d2a'
     };
-    // número del contador 'viewing' → sala (las cámaras nativas son 1..12)
-    const VIEWING_TO_ROOM = {};
-    for (let n = 1; n <= 12; n++) VIEWING_TO_ROOM[n] = 'cam' + n;
-    // qué salas se ven en cada cámara (el pasillo principal cubre el tramo 1)
-    const CAM_COVERS = { cam7: ['cam7', 'hall1'] };
+    // sala (id MP) → número de cámara nativa para re-pulsar tras movimientos
+    const ROOM_TO_CAM = {
+        cam1: 1, cam2: 2, cam3: 3, cam4: 4, cam5: 5, cam6: 6, cam7: 7,
+        cam8: 8, cam9: 9, cam10: 10, cam11: 11, cam12: 12, hall1: 7
+    };
+    // v6 · HANDLES DE LAS 12 VISTAS DE SALA (extraídos e identificados
+    // del imageBank del propio juego, verificados en pantalla con el
+    // sprite de cámara 'Active 16'). El monitor muestra estos BITMAPS
+    // ORIGINALES del juego — la vista es 100% nativa:
+    //   1-4 salas de fiesta · 5/6 conductos · 7 pasillo · 8 refacciones
+    //   9 escenario · 10 juegos · 11 premios · 12 caverna
+    // Variantes interesantes (por si se quieren ocupantes de fábrica):
+    //   176 pasillo-con-Freddy · 168 premios-iluminado · 117 refacciones-cabezas
+    const CAM_VIEW_HANDLE = {
+        1: 40, 2: 50, 3: 43, 4: 33,
+        5: 84, 6: 84, 7: 58, 8: 92,
+        9: 118, 10: 123, 11: 83, 12: 129
+    };
+    // posición inicial (casa) de cada botón 'cam N' del mapa nativo
+    // (el guion del demo arrastra el mapa y los botones "corren" por
+    // el mundo 1600x768; el ratón del juego no sale de 0..1023 → un
+    // botón desplazado es inclikable → se repone a su casa y se clica)
+    const CAM_HOME = {
+        1: [602, 557], 2: [734, 558], 3: [602, 491], 4: [737, 491],
+        5: [608, 651], 6: [723, 651], 7: [758, 431], 8: [603, 420],
+        9: [915, 390], 10: [847, 509], 11: [950, 465], 12: [933, 558]
+    };
+    // sprites NATIVOS de los animatrónicos asomando en hall/oficina
+    // (verificados contra el image bank: 'bonnie' = conejo morado
+    // destrozado, 'chica' = gallina destrozada...)
+    const PEEK_SPRITE = {
+        w_bonnie: 'bonnie', w_chica: 'chica', w_foxy: 'foxy',
+        toy_bonnie: 'toy bonnie', bb: 'BB', w_freddy: 'freddy under table'
+    };
+    // sprites de la caja musical nativa (CÁM 11)
+    const BOX_SPRITES = ['music button', 'wind up text', 'click and hold text', 'music box counter'];
+    // sprites que TAPAN la vista nativa del monitor (nacen torcidos)
+    const CAM_BLIGHTS = ['white button', 'blip 2', 'flip animation'];
     // contadores de IA que hay que congelar (todos, en ambos sets)
     const AI_COUNTERS = [
         'freddy AI', 'bonie AI', 'chica AI', 'foxy AI', 'BB AI',
@@ -327,6 +387,10 @@
             clientX, clientY, button: 0, buttons: btns,
             pointerId: 1, pointerType: 'mouse', isPrimary: true, view: window
         });
+        // v5: primero MOVER el ratón del runtime a la posición (el
+        // clic en objeto se evalúa contra la posición trackeada por
+        // pointermove — sin esto el clic cae donde estaba el ratón)
+        canvas.dispatchEvent(mk('pointermove', 0));
         canvas.dispatchEvent(mk('pointerdown', 1));
         setTimeout(() => canvas.dispatchEvent(mk('pointerup', 0)), 90);
     }
@@ -478,61 +542,43 @@
     }
 
     // ---------------------------------------------------------
-    // v4 · OVERLAY DE CÁMARAS (fix "NO SIGNAL")
-    // El monitor nativo no dibuja sus vistas con el runtime 291 +
-    // datos 292 (pantalla blanca). Este overlay lee el estado nativo
-    // (botón flip + contador 'viewing') y muestra la vista en HTML:
-    // imagen real de la sala, ocupantes, mapa clicable y botón para
-    // bajar el monitor. Cambiar de cámara escribe el contador nativo
-    // para que la lógica del juego (caja musical en CÁM 11, etc.)
-    // siga funcionando.
+    // v5 · MONITOR DE CÁMARAS 100% NATIVO
+    // La vista que ve el guardia la dibuja EL MOTOR ORIGINAL
+    // (sprite 'Active 16' con el bitmap nativo de cada sala).
+    // El driver solo:
+    //   1. destierra los sprites torcidos que la tapan
+    //      ('white button' rect blanco + 'blip 2'/'flip animation'
+    //      overlays de transición eternos),
+    //   2. fuerza 'Active 16' visible,
+    //   3. quita el background CSS de la oficina mientras el
+    //      monitor esté arriba (y lo repone al bajarlo),
+    //   4. re-abre el monitor si el guion del demo lo cierra
+    //      por su cuenta (mientras el guardia no lo haya bajado),
+    //   5. muestra la caja musical nativa solo en la CÁM 11.
+    // El mini-mapa HTML es SOLO un mando: cada botón dispara el
+    // botón 'cam N' NATIVO del juego (la vista cambia por el
+    // propio motor, verificada en vivo: 'cam 8' → Refacciones).
     // ---------------------------------------------------------
-    const CAM_NUM_NAME = {
-        1: 'SALA DE FIESTAS 1', 2: 'SALA DE FIESTAS 2', 3: 'SALA DE FIESTAS 3', 4: 'SALA DE FIESTAS 4',
-        5: 'CONDUCTO DE AIRE IZQ.', 6: 'CONDUCTO DE AIRE DER.', 7: 'PASILLO PRINCIPAL', 8: 'REFACCIONES',
-        9: 'ESCENARIO', 10: 'ÁREA DE JUEGOS', 11: 'RINCÓN DE PREMIOS', 12: 'CAVERNA DEL NIÑO'
-    };
-    let camOverlay = null, camShown = -1;
+    let monitorUI = null;
 
-    function ensureCamOverlay() {
-        if (camOverlay) return;
+    function ensureMonitorUI() {
+        if (monitorUI) return;
         const d = document.createElement('div');
-        d.id = 'mp-cams';
-        d.style.cssText = 'position:fixed;inset:0;z-index:8000;display:none;pointer-events:none;background:#020203;font-family:monospace';
-        d.innerHTML =
-            '<div id="mp-cam-imgwrap" style="position:absolute;inset:0;overflow:hidden">' +
-            '<img id="mp-cam-img" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);min-width:100vw;min-height:100vh;object-fit:cover;filter:brightness(.82) contrast(1.12) saturate(.9)">' +
-            '<div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px)"></div>' +
-            '<div id="mp-cam-vig" style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)"></div>' +
-            '<div id="mp-cam-burst" style="position:absolute;inset:0;display:none;background:repeating-conic-gradient(#888 0% .25%,#000 .25% .5%) 0 0/64px 64px;opacity:.85;mix-blend-mode:screen"></div>' +
-            '</div>' +
-            '<div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);text-align:center">' +
-            '<div id="mp-cam-title" style="font-size:22px;font-weight:bold;letter-spacing:4px;color:#e8e6df;text-shadow:0 0 12px rgba(255,255,255,.4)">CÁM 09</div>' +
-            '<div id="mp-cam-sub" style="font-size:12px;letter-spacing:3px;color:#9aa;margin-top:4px">ESCENARIO</div>' +
-            '</div>' +
-            '<div style="position:absolute;top:18px;left:18px;font-size:12px;color:#ff5d5d;letter-spacing:2px">' +
-            '<span id="mp-cam-rec">●</span> REC · <span id="mp-cam-clock">12 AM</span> · NOCHE <span id="mp-cam-night">1</span>' +
-            '</div>' +
-            '<div id="mp-cam-occ" style="position:absolute;bottom:120px;left:50%;transform:translateX(-50%);display:flex;gap:18px;align-items:flex-end"></div>' +
-            // CÁM 11: barra de la caja musical
-            '<div id="mp-cam-box" style="position:absolute;bottom:190px;left:50%;transform:translateX(-50%);display:none;text-align:center">' +
-            '<div style="font-size:12px;color:#e8d6fe;letter-spacing:2px">🎵 CAJA MUSICAL — <span id="mp-cam-boxpct">100%</span></div>' +
-            '<div style="width:260px;height:10px;background:#120a18;border:1px solid #4a3a5a;margin-top:4px"><div id="mp-cam-boxbar" style="height:100%;width:100%;background:#e8d6fe"></div></div>' +
-            '<div style="font-size:10px;color:#8a7a9a;margin-top:3px">DAR CUERDA: botón abajo-izquierda (mantener)</div>' +
-            '</div>' +
-            // mapa de cámaras clicable
-            '<div id="mp-cam-map" style="position:absolute;right:16px;bottom:16px;pointer-events:auto;background:rgba(4,6,10,.88);border:1px solid #2c3140;padding:10px"></div>' +
-            // bajar monitor
-            '<button id="mp-cam-down" style="position:absolute;left:50%;bottom:14px;transform:translateX(-50%);pointer-events:auto;background:#123;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;font-size:15px;letter-spacing:2px;padding:10px 26px;cursor:pointer;border-radius:6px">▼ BAJAR MONITOR</button>';
-        document.body.appendChild(d);
-        camOverlay = d;
-
-        // mapa: botones CÁM 01..12
-        const map = d.querySelector('#mp-cam-map');
-        const layout = [
-            [8, 3, 7], [1, 5, 9, 11], [4, 2, 6, 10, 12]
-        ];
-        map.innerHTML = '<div style="font-size:10px;color:#667;letter-spacing:2px;margin-bottom:6px">CÁMARAS — PULSA PARA VER</div>';
+        d.id = 'mp-monitor-ui';
+        d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9000;pointer-events:none;font-family:monospace';
+        // franja central: subir/bajar el monitor (clic nativo)
+        const btn = document.createElement('button');
+        btn.id = 'mp-flip-btn';
+        btn.textContent = '▲ SUBIR MONITOR';
+        btn.style.cssText = 'pointer-events:auto;background:#0a1626;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;font-size:15px;letter-spacing:2px;padding:10px 30px;cursor:pointer;border-radius:6px;position:absolute;left:50%;bottom:12px;transform:translateX(-50%)';
+        btn.addEventListener('click', () => { toggleMonitor(); });
+        d.appendChild(btn);
+        // mini-mapa: SOLO mando → botones nativos 'cam N'
+        const map = document.createElement('div');
+        map.id = 'mp-cam-map';
+        map.style.cssText = 'position:absolute;right:14px;bottom:14px;pointer-events:auto;background:rgba(4,6,10,.82);border:1px solid #2c3140;padding:10px';
+        map.innerHTML = '<div style="font-size:10px;color:#667;letter-spacing:2px;margin-bottom:6px">CÁMARAS · VISTA NATIVA</div>';
+        const layout = [[8, 3, 7], [1, 5, 9, 11], [4, 2, 6, 10, 12]];
         layout.forEach(row => {
             const r = document.createElement('div');
             r.style.cssText = 'display:flex;gap:4px;margin-bottom:4px';
@@ -540,105 +586,246 @@
                 const b = document.createElement('button');
                 b.id = 'mp-cambtn-' + n;
                 b.textContent = ('0' + n).slice(-2);
+                b.title = ROOM_NAME['cam' + n] || ('CÁM ' + n);
                 b.style.cssText = 'width:38px;height:30px;font-family:monospace;font-weight:bold;font-size:12px;background:#0d1017;color:#7d8494;border:1px solid #2c3140;cursor:pointer';
-                b.addEventListener('click', () => switchCam(n));
+                b.addEventListener('click', () => { clickCamButton(n); });
                 r.appendChild(b);
             });
             map.appendChild(r);
         });
-
-        d.querySelector('#mp-cam-down').addEventListener('click', () => {
-            const fp = find('flip panel button');
-            if (fp) gameClick(fp.hoX, fp.hoY);
-        });
+        d.appendChild(map);
+        document.body.appendChild(d);
+        monitorUI = d;
     }
 
-    function switchCam(n) {
+    function toggleMonitor() {
+        if (state.phase !== 'night') return;
+        state.lastFlipClick = Date.now();
+        state.wantMonitor = !state.wantMonitor;
+        setNativeMonitor(state.wantMonitor);
+        if (state.wantMonitor && !state.viewingMP) {
+            // al abrirlo por primera vez: el ESCENARIO (como el juego)
+            setTimeout(() => { if (state.monitorUp) clickCamButton(9); }, 400);
+        } else if (state.wantMonitor && state.viewingMP) {
+            // el monitor vuelve a la última cámara vigilada
+            setTimeout(() => { if (state.monitorUp && state.viewingMP) clickCamButton(state.viewingMP); }, 400);
+        }
+    }
+
+    // estado del monitor nativo: el alterable 0 del botón 'flip panel
+    // button' es el estado lógico que el propio juego lee (el overlay
+    // v4 ya lo usaba para detectar el monitor). Al escribirlo no
+    // dependemos del clic nativo de la franja (que con 291+292 es
+    // intermitente); la vista la despliega el driver.
+    function setNativeMonitor(open) {
+        const fp = find('flip panel button');
+        if (!fp || !fp.rov || !fp.rov.rvValues) return;
+        fp.rov.rvValues[0] = open ? 1 : 0;
+    }
+
+    function clickCamButton(n) {
         if (n < 1 || n > 12) return;
+        // v6.1 · doble vía:
+        //  (1) el BITMAP ORIGINAL de la sala directo al sprite de cámara
+        //      (rcImage + rcChanged + rmMangle) y el contador para la
+        //      lógica nativa (caja en CÁM 11, etc.),
+        //  (2) el botón nativo 'cam N' repuesto a su posición inicial
+        //      + clic — dispara el despliegue completo del juego
+        //      (los eventos nativos muestran la vista cuando llegan a
+        //      procesarse; el mapa del demo arrastra los botones y se
+        //      vuelven inclikables, de ahí el reposicionamiento).
         setRS('viewing', n);
         setRS('last viewed', n);
-        camBurst();
-    }
-
-    function camBurst() {
-        const b = document.getElementById('mp-cam-burst');
-        if (!b) return;
-        b.style.display = 'block';
-        clearTimeout(b.__t);
-        b.__t = setTimeout(() => { b.style.display = 'none'; }, 260);
-    }
-
-    function occupantsHtml(roomIds) {
-        const occ = [];
-        Object.keys(MARKER).forEach(role => {
-            const p = state.players[role];
-            const room = p ? p.room : START_ROOM[role];
-            if (roomIds.indexOf(room) !== -1) {
-                occ.push({ role, player: p ? p.name : null });
-            }
-        });
-        if (!occ.length) return '';
-        return occ.map(o =>
-            '<div style="text-align:center;pointer-events:none">' +
-            '<img src="' + MP_URL + 'assets/roles/' + ROLE_IMG[o.role] + '" style="width:74px;height:74px;object-fit:contain;filter:drop-shadow(0 0 10px rgba(255,255,255,.25))">' +
-            '<div style="font-size:10px;letter-spacing:1px;margin-top:3px;color:' + (o.player ? '#ffd34d' : '#5a6272') + '">' +
-            ROLE_NAME[o.role] + (o.player ? '' : ' · IA') + '</div></div>'
-        ).join('');
-    }
-
-    function updateCamOverlay() {
-        ensureCamOverlay();
-        const a = app();
-        const active = !!(a && a.currentFrame === NIGHT_FRAME && state.phase === 'night');
-        let open = false, viewing = 0;
-        if (active) {
-            const fp = find('flip panel button');
-            open = !!(fp && fp.rov && fp.rov.rvValues && fp.rov.rvValues[0] === 1);
-            viewing = rs('viewing') || 0;
+        state.viewingMP = n;
+        state.lastCamClick = Date.now();
+        const a16 = find('Active 16');
+        if (a16 && CAM_VIEW_HANDLE[n]) {
+            a16.roc.rcImage = CAM_VIEW_HANDLE[n];
+            a16.roc.rcChanged = true;
+            if (a16.rom) a16.rom.rmMangle = 1;
         }
-        if (!open || !viewing) {
-            if (camShown !== -1) { camOverlay.style.display = 'none'; camShown = -1; }
-            return;
+        const o = find(CAM_BUTTON_NAME[n]);
+        if (o && CAM_HOME[n]) {
+            o.hoX = CAM_HOME[n][0];
+            o.hoY = CAM_HOME[n][1];
+            if (o.rom) o.rom.rmMangle = 1;
+            setTimeout(() => { gameClick(o.hoX, o.hoY); }, 200);
         }
-        const roomId = VIEWING_TO_ROOM[viewing] || ('cam' + viewing);
-        if (camShown !== viewing) {
-            camShown = viewing;
-            camBurst();
-            const img = document.getElementById('mp-cam-img');
-            if (img) img.src = MP_URL + (ROOM_IMG[roomId] || ROOM_IMG.cam9);
-            document.getElementById('mp-cam-title').textContent = 'CÁM ' + ('0' + viewing).slice(-2);
-            document.getElementById('mp-cam-sub').textContent = CAM_NUM_NAME[viewing] || ROOM_NAME[roomId] || '';
-        }
-        camOverlay.style.display = 'block';
-        // reloj/noche/REC
-        document.getElementById('mp-cam-night').textContent = state.night;
-        document.getElementById('mp-cam-clock').textContent = (state.mpHour === 12 ? '12' : state.mpHour) + ' AM';
-        // ocupantes (con refresco: los jugadores se mueven)
-        const covers = CAM_COVERS[roomId] || [roomId];
-        document.getElementById('mp-cam-occ').innerHTML = occupantsHtml(covers);
-        // CÁM 11: barra de la caja
-        const boxWrap = document.getElementById('mp-cam-box');
-        if (viewing === 11) {
-            boxWrap.style.display = 'block';
-            const pct = Math.max(0, Math.round(state.boxLevel / BOX_MAX * 100));
-            const bar = document.getElementById('mp-cam-boxbar');
-            bar.style.width = pct + '%';
-            bar.style.background = pct < 25 ? '#ff5b5b' : (pct < 50 ? '#ffb84d' : '#e8d6fe');
-            document.getElementById('mp-cam-boxpct').textContent = pct + '%';
-        } else {
-            boxWrap.style.display = 'none';
-        }
-        // botón activo del mapa
-        for (let n = 1; n <= 12; n++) {
-            const b = document.getElementById('mp-cambtn-' + n);
+        for (let k = 1; k <= 12; k++) {
+            const b = document.getElementById('mp-cambtn-' + k);
             if (b) {
-                const on = (n === viewing);
+                const on = (k === n);
                 b.style.background = on ? '#3d80ff' : '#0d1017';
                 b.style.color = on ? '#fff' : '#7d8494';
                 b.style.borderColor = on ? '#7ec8ff' : '#2c3140';
             }
         }
     }
+
+    // re-pulsar la cámara vigilada tras un movimiento (refresca el
+    // frame por si el motor incorpora al ocupante)
+    function scheduleCamRepulse(delay) {
+        clearTimeout(state.__camRepulse);
+        state.__camRepulse = setTimeout(() => {
+            if (state.phase !== 'night' || !state.monitorUp || !state.viewingMP) return;
+            if (Date.now() - (state.lastCamClick || 0) < 400) return;
+            clickCamButton(state.viewingMP);
+        }, delay || 700);
+    }
+
+    function banishCamBlights() {
+        CAM_BLIGHTS.forEach(nm => {
+            const o = find(nm);
+            if (o && (o.hoX > -400 || o.hoY > -400)) {
+                o.hoX = -5000;
+                o.hoY = -5000;
+                if (o.rom) o.rom.rmMangle = 1;
+            }
+        });
+    }
+
+    // RADAR del mini-mapa: puntos con la posición EN VIVO de cada
+    // animatrónico (la vista de cámara es 100% nativa del motor; los
+    // puntos del mando reflejan el movimiento online de los jugadores)
+    function updateMapDots() {
+        const map = document.getElementById('mp-cam-map');
+        if (!map) return;
+        let layer = document.getElementById('mp-cam-dots');
+        if (!layer) {
+            layer = document.createElement('div');
+            layer.id = 'mp-cam-dots';
+            layer.style.cssText = 'position:relative;height:64px;margin-top:8px;background:rgba(10,14,22,.6);border:1px solid #1d2736;border-radius:4px;overflow:hidden';
+            map.appendChild(layer);
+        }
+        let html = '';
+        Object.keys(MARKER).forEach(role => {
+            const p = state.players[role];
+            const room = p ? p.room : START_ROOM[role];
+            const pos = MAP_DOT[room];
+            if (!pos) return;
+            html += '<div title="' + (ROLE_NAME[role] || role) + (p ? ' (' + p.name + ')' : ' · IA') +
+                '" style="position:absolute;left:' + pos[0] + '%;top:' + pos[1] * 0.88 + '%;width:9px;height:9px;margin:-4px;border-radius:50%;background:' +
+                (ROLE_DOT_COLOR[role] || '#888') + ';border:1px solid rgba(255,255,255,.5);box-shadow:0 0 6px ' + (ROLE_DOT_COLOR[role] || '#888') +
+                ';opacity:' + (p ? 1 : .45) + '"></div>';
+        });
+        // la cámara vigilada
+        if (state.viewingMP && MAP_DOT['cam' + state.viewingMP]) {
+            const vp = MAP_DOT['cam' + state.viewingMP];
+            html += '<div style="position:absolute;left:' + vp[0] + '%;top:' + vp[1] * 0.88 + '%;width:12px;height:12px;margin:-6px;border:2px solid #7ec8ff;border-radius:2px;box-shadow:0 0 8px #7ec8ff"></div>';
+        }
+        layer.innerHTML = html;
+    }
+
+    function driveNativeMonitor() {
+        const a = app();
+        const inNight = !!(a && a.currentFrame === NIGHT_FRAME && state.phase === 'night');
+        if (!inNight) {
+            if (state.bgHidden) { document.body.style.backgroundImage = ''; state.bgHidden = false; }
+            if (monitorUI) monitorUI.style.display = 'none';
+            return;
+        }
+        ensureMonitorUI();
+        monitorUI.style.display = 'block';
+        const fp = find('flip panel button');
+        const open = !!(fp && fp.rov && fp.rov.rvValues && fp.rov.rvValues[0] === 1);
+        state.monitorUp = open;
+        const flipBtn = document.getElementById('mp-flip-btn');
+        if (flipBtn) flipBtn.textContent = open ? '▼ BAJAR MONITOR' : '▲ SUBIR MONITOR';
+        if (!open) {
+            // el guion del demo cierra el monitor por su cuenta:
+            // re-abrirlo mientras el guardia no lo haya bajado él
+            if (state.wantMonitor && !state.killDone && Date.now() - (state.lastFlipClick || 0) > 1500) {
+                setNativeMonitor(true);
+                if (!state.viewingMP) {
+                    setTimeout(() => { if (state.monitorUp) clickCamButton(9); }, 400);
+                } else {
+                    setTimeout(() => { if (state.monitorUp && state.viewingMP) clickCamButton(state.viewingMP); }, 400);
+                }
+            }
+            if (state.bgHidden) { document.body.style.backgroundImage = ''; state.bgHidden = false; }
+            return;
+        }
+        // monitor ARRIBA: la vista NATIVA manda
+        if (!state.bgHidden) { document.body.style.backgroundImage = 'none'; state.bgHidden = true; }
+        banishCamBlights();
+        const a16 = find('Active 16');
+        if (a16 && a16.ros && !(a16.ros.rsFlags & 0x20)) {
+            a16.ros.rsFlags |= 0x20;      // RSFLAG_VISIBLE
+            if (a16.rom) a16.rom.rmMangle = 1;
+        }
+        // v6 · GUERRA CON EL GUION DEL DEMO: el guion vuelve a poner su
+        // mapa de "señal interrumpida" (rcImage de mapa + estática +
+        // el sprite 'Active 15' — el mapa grande — encima de la vista)
+        // cada pocos segundos. El driver repone el BITMAP ORIGINAL de
+        // la sala vigilada cada 250ms (gana siempre), apaga la
+        // estática salvo durante el flash del cambio y oculta el mapa.
+        if (state.viewingMP && CAM_VIEW_HANDLE[state.viewingMP] && a16) {
+            const want = CAM_VIEW_HANDLE[state.viewingMP];
+            if (a16.roc.rcImage !== want) {
+                a16.roc.rcImage = want;
+                a16.roc.rcChanged = true;
+                if (a16.rom) a16.rom.rmMangle = 1;
+            }
+            if (Date.now() - (state.lastCamClick || 0) > 600) {
+                const st = find('static');
+                if (st && st.ros && (st.ros.rsFlags & 0x20)) st.ros.rsFlags &= ~0x20;
+            }
+            // el mapa grande del monitor ('Active 15') ENCIMA de la vista
+            const a15 = find('Active 15');
+            if (a15 && a15.ros && (a15.ros.rsFlags & 0x20)) a15.ros.rsFlags &= ~0x20;
+        }
+        // radar del mini-mapa (posición en vivo de los animatrónicos)
+        updateMapDots();
+        // caja musical nativa: sus sprites solo en la CÁM 11 (los
+        // eventos del juego los re-muestran si solo se ocultan →
+        // se DESTIERRAN por posición y se restauran al vigilar la 11)
+        const showBox = (state.viewingMP === 11);
+        if (!state.__boxHome) state.__boxHome = {};
+        BOX_SPRITES.forEach(nm => {
+            const o = find(nm);
+            if (!o) return;
+            if (state.__boxHome[nm] === undefined && (o.hoX > -400 || o.hoY > -400)) {
+                state.__boxHome[nm] = [o.hoX, o.hoY];
+            }
+            const home = state.__boxHome[nm];
+            if (showBox) {
+                if (home && (o.hoX !== home[0] || o.hoY !== home[1])) {
+                    o.hoX = home[0]; o.hoY = home[1];
+                    if (o.rom) o.rom.rmMangle = 1;
+                }
+            } else if (o.hoX > -400 || o.hoY > -400) {
+                o.hoX = -6000; o.hoY = -6000;
+                if (o.rom) o.rom.rmMangle = 1;
+            }
+        });
+    }
+
+    // ASOMADOS: sprites nativos del animatrónico que asoma en el
+    // hall/oficina. Solo se muestran con el monitor BAJADO (la
+    // oficina a la vista); el sprite SIEMPRE corresponde al rol
+    // del jugador que está ahí (bug de identidad corregido:
+    // 'bonnie' = el conejo morado destrozado del rol w_bonnie).
+    function drivePeekSprites() {
+        const a = app();
+        if (!a || a.currentFrame !== NIGHT_FRAME || state.phase !== 'night') return;
+        const peeks = {};
+        if (!state.monitorUp) {
+            Object.keys(MARKER).forEach(role => {
+                const p = state.players[role];
+                const room = p ? p.room : null;
+                if ((room === 'hall1' || room === 'hall2' || room === 'office') && PEEK_SPRITE[role]) {
+                    peeks[PEEK_SPRITE[role]] = true;
+                }
+            });
+        }
+        Object.keys(PEEK_SPRITE).forEach(role => {
+            const o = find(PEEK_SPRITE[role]);
+            if (!o || !o.ros) return;
+            if (peeks[PEEK_SPRITE[role]]) o.ros.rsFlags |= 0x20;
+            else o.ros.rsFlags &= ~0x20;
+        });
+    }
+
 
     // ---------------------------------------------------------
     // ⚡ DESTELLO del guardia (portado del FNAF 1 MP)
@@ -797,6 +984,10 @@
         }
         broadcast({ t: 'moved', role: role, room: to, roomName: ROOM_NAME[to] });
         broadcastPlayers();
+        // v5: si el guardia está vigilando la sala a la que ha
+        // llegado el jugador → re-pulsar la cámara para que el
+        // frame nativo incorpore al ocupante
+        if (state.monitorUp && ROOM_TO_CAM[to] === state.viewingMP) scheduleCamRepulse(700);
     }
     function sendMoveDeny(role, m, why) {
         if (state.host) {
@@ -1056,15 +1247,45 @@
     }
 
     // ---------------------------------------------------------
-    // Desactiva los MOVERS nativos de marcadores: el guion del demo
-    // reposiciona los marcadores por eventos (a los ~12s mete a
-    // old foxy en 'got you box' y a new bonnie/chica EN LA OFICINA →
-    // kill nativo → GOLEVEL al menú = la muerte aleatoria). Se
-    // desactivan los grupos que POSICIONAN marcadores (acción 65538
-    // con OI de marcador) y NO pertenecen a la cadena de kill/render
-    // (condiciones sobre being-attacked/got-you/in-office/occupied).
-    // Los marcadores pasan a ser 100% del host (tpMarker).
+    // v6 · DESACTIVA EL GUION DEL MONITOR DEL DEMO: sus grupos
+    // (condicionados por los contadores 'viewing'/'last viewed')
+    // vuelven a poner el mapa de "señal interrumpida" (sprite
+    // 'Active 15' + estática + rcImage de mapa) CADA TICK — más
+    // rápido de lo que cualquier driver pueda reponer la vista.
+    // Sin ellos, la vista de cámara queda 100% en manos del
+    // puente (rcImage + visibilidades + destierros), que muestra
+    // el BITMAP ORIGINAL de la sala vigilada de forma estable.
+    // La caja musical no se toca (nivel = contador, no viewing).
     // ---------------------------------------------------------
+    function disableMonitorScript() {
+        const a = app();
+        if (!a || !a.run || !a.run.rhEvtProg) return;
+        const targets = { 'viewing': 1, 'last viewed': 1, 'Active 15': 1, 'signal out': 1 };
+        const tOi = {};
+        try {
+            const list = a.run.rhOiList;
+            for (let i = 0; i < a.run.rhMaxOI; i++) {
+                const oi = list[i];
+                if (oi && oi.oilName && targets[oi.oilName]) tOi[i] = oi.oilName;
+            }
+        } catch (e) { }
+        const groups = a.run.rhEvtProg.events || [];
+        let disabled = 0;
+        groups.forEach(grp => {
+            if (!grp || !grp.evgEvents || (grp.evgFlags & 0x4000)) return;
+            let touches = false;
+            grp.evgEvents.forEach((ev, i) => {
+                if (!ev) return;
+                if (tOi[ev.evtOiList]) touches = true;
+            });
+            if (touches) {
+                grp.evgFlags |= 0x4000;   // EVGFLAGS_INACTIVE
+                disabled++;
+            }
+        });
+        try { console.log('[MP] guion del monitor desactivado: ' + disabled + ' grupos'); } catch (e) { }
+    }
+
     function disableNativeMarkerMovers() {
         const a = app();
         if (!a || !a.run || !a.run.rhEvtProg) return;
@@ -1348,8 +1569,14 @@
         state.specialAt = {};
         state.sprintUntil = {};
         state.batteryBlockUntil = 0;
+        state.wantMonitor = false;     // v5: monitor nativo
+        state.viewingMP = 0;
+        state.monitorUp = false;
+        state.lastFlipClick = 0;
+        state.lastCamClick = 0;
         hideCurtain();
         ensureGuardUI();
+        ensureMonitorUI();
         document.getElementById('mp-stun-btn').style.display = 'inline-block';
         document.getElementById('mp-box-wrap').style.display = 'block';
         gline('noche ' + state.night + ' en marcha — sala ' + ROOM);
@@ -1596,8 +1823,13 @@
             st.textContent = '@keyframes mpboxblink{0%{box-shadow:0 0 0 1px #ff5b5b}50%{box-shadow:0 0 14px 3px rgba(255,60,60,.9)}}';
             document.head.appendChild(st);
         } catch (e) { }
-        if (!window.__mpCamPoll) {
-            window.__mpCamPoll = setInterval(updateCamOverlay, 150);
+        // v5: bucles del monitor de cámaras NATIVO (250ms) y de los
+        // asomados (500ms) — la vista es del motor original
+        if (!window.__mpMonitorDrv) {
+            window.__mpMonitorDrv = setInterval(driveNativeMonitor, 250);
+        }
+        if (!window.__mpPeekDrv) {
+            window.__mpPeekDrv = setInterval(drivePeekSprites, 500);
         }
         // MP: neutralizar la pausa por foco (blur) — la noche compartida
         // no se detiene aunque el guardia cambie de ventana

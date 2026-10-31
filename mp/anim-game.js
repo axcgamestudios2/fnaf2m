@@ -75,15 +75,18 @@
     const MOVE_CD = ROLE === 'mangle' ? 5000 : 6000;
 
     // ------------------- Vista de sala (v2) -------------------
-    // imágenes verificadas del propio juego: lo que el animatrónico
-    // ve desde su sala (con pan lento + CRT ya en el HTML)
+    // v6: imágenes EXTRAÍDAS DEL PROPIO JUEGO (imageBank nativo) — la
+    // vista del animatrónico es el MISMO bitmap que ve el guardia en
+    // su monitor (identidad 100%: la sala que se ve es la sala real).
+    // El hall (tramos del pasillo) es la vista nativa del pasillo
+    // principal y la oficina, el fondo original del juego.
     const ROOM_IMG = {
         cam1: 'assets/cams/cam01.jpg', cam2: 'assets/cams/cam02.jpg', cam3: 'assets/cams/cam03.jpg',
         cam4: 'assets/cams/cam04.jpg', cam5: 'assets/cams/cam05.jpg', cam6: 'assets/cams/cam06.jpg',
         cam7: 'assets/cams/cam07.jpg', cam8: 'assets/cams/cam08.jpg', cam9: 'assets/cams/cam09.jpg',
         cam10: 'assets/cams/cam10.jpg', cam11: 'assets/cams/cam11.jpg', cam12: 'assets/cams/cam12.jpg',
         hall1: 'assets/cams/hall1.jpg', hall2: 'assets/cams/hall2.jpg',
-        office: 'assets/cams/hall2.jpg'   // desde la puerta: el frente de la oficina
+        office: 'assets/cams/office.jpg'   // dentro: el escritorio del guardia
     };
     function renderRoomView() {
         const rv = document.getElementById('roomview');
