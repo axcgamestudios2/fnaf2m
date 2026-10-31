@@ -1,9 +1,9 @@
 // ============================================================
-// FNAF 2 MP — Cliente del ANIMATRÓNICO (v1)
+// THE LOST PIZZERIA — Cliente del ANIMATRÓNICO (v2)
 // URL: anim.html?mp=<CODIGO>&role=<rol>&name=<nombre>
 // El GUARDIA (host) mueve los marcadores nativos del juego
-// original: las cámaras que ve el guardia se re-renderizan
-// solas. Aquí solo se pide mover / atacar y se refleja estado.
+// original. v2: el animatrónico VE su sala (imagen real del juego
+// + FX CRT), reloj REAL del host y avisos de la caja musical.
 // ============================================================
 
 (function () {
@@ -74,6 +74,36 @@
     };
     const MOVE_CD = ROLE === 'mangle' ? 5000 : 6000;
 
+    // ------------------- Vista de sala (v2) -------------------
+    // imágenes verificadas del propio juego: lo que el animatrónico
+    // ve desde su sala (con pan lento + CRT ya en el HTML)
+    const ROOM_IMG = {
+        cam1: 'assets/cams/cam01.jpg', cam2: 'assets/cams/cam02.jpg', cam3: 'assets/cams/cam03.jpg',
+        cam4: 'assets/cams/cam04.jpg', cam5: 'assets/cams/cam05.jpg', cam6: 'assets/cams/cam06.jpg',
+        cam7: 'assets/cams/cam07.jpg', cam8: 'assets/cams/cam08.jpg', cam9: 'assets/cams/cam09.jpg',
+        cam10: 'assets/cams/cam10.jpg', cam11: 'assets/cams/cam11.jpg', cam12: 'assets/cams/cam12.jpg',
+        hall1: 'assets/cams/hall1.jpg', hall2: 'assets/cams/hall2.jpg',
+        office: 'assets/cams/hall2.jpg'   // desde la puerta: el frente de la oficina
+    };
+    function renderRoomView() {
+        const rv = document.getElementById('roomview');
+        const img = document.getElementById('roomimg');
+        const label = document.getElementById('roomlabel');
+        if (!rv || !img) return;
+        const src = ROOM_IMG[S.room];
+        if (src && img.getAttribute('src') !== src) img.src = src;
+        rv.classList.toggle('office', S.room === 'office');
+        if (label) label.textContent = 'CÁMARA INTERNA · ' + (ROOM_NAME[S.room] || S.room);
+        rv.style.display = (S.phase === 'night' || S.phase === 'waiting') ? 'block' : 'none';
+    }
+    function staticFlash(ms) {
+        const f = document.getElementById('staticflash');
+        if (!f) return;
+        f.style.display = 'block';
+        clearTimeout(f.__t);
+        f.__t = setTimeout(() => { f.style.display = 'none'; }, ms || 420);
+    }
+
     // ------------------- Habilidades [Q] por rol -------------------
     const ABILITIES = {
         toy_freddy: { name: 'FAROL', desc: 'banner falso de oficina' },
@@ -94,6 +124,7 @@
         phase: 'connecting',     // connecting → waiting → night → dead → win
         room: START_ROOM[ROLE] || 'cam8',
         night: 1,
+        hour: 12,               // reloj REAL del host (v2)
         lastMove: 0,
         stunnedUntil: 0,
         inOffice: false,
@@ -274,6 +305,7 @@
             if (m.phase) S.phase = m.phase === 'night' && S.phase !== 'dead' ? 'night' : S.phase;
             paintMates();
             if (S.phase === 'night') { hideScreen(); hideWait(); renderAll(); }
+            renderRoomView();
         });
         c.on('box', (m) => {
             if (typeof m.pct === 'number') {
@@ -289,11 +321,14 @@
             S.night = m.night || 1;
             S.phase = 'night';
             S.room = START_ROOM[ROLE] || 'cam8';
+            S.hour = 12;
             S.lastMove = Date.now();
             S.lastSpecial = 0;
             hideScreen();
             hideWait();
+            staticFlash(600);
             renderAll();
+            renderRoomView();
             toast('🌙 NOCHE ' + S.night + ' — el guardia está en la oficina. ¡A cazar!');
         });
         // v3: el guardia armó la revancha — volver a la espera (sin negro)
@@ -303,19 +338,24 @@
             S.inOffice = false;
             S.lastMove = Date.now();
             S.boxEmpty = false;
+            S.hour = 12;
             $('doorbanner').style.display = 'none';
             $('stunbar').style.display = 'none';
             hideScreen();
+            staticFlash();
             showWait('ESPERANDO AL GUARDIA…',
                 'revancha: la noche ' + (m.night || '') + ' empieza en breve');
             renderAll();
+            renderRoomView();
         });
         c.on('moved', (m) => {
             if (m.role === ROLE) {
                 S.room = m.room;
                 S.lastMove = Date.now();
                 S.inOffice = m.room === 'office';
+                staticFlash();
                 renderAll();
+                renderRoomView();
             }
         });
         c.on('moveDeny', (m) => { toast('✖ ' + (m.why || 'movimiento rechazado')); renderNav(); });
@@ -327,6 +367,7 @@
                 b.innerHTML = 'ESTÁS EN LA OFICINA' +
                     '<div class="sub">' + (ROLE === 'bb' ? '¡Roba la linterna! (automático)' : 'Pulsa [ESP] JUMPSCARE antes de que se máSQUE') + '</div>';
                 renderNav();
+                renderRoomView();
             }
         });
         c.on('retreat', (m) => {
@@ -334,7 +375,9 @@
                 S.room = m.room;
                 S.inOffice = false;
                 $('doorbanner').style.display = 'none';
+                staticFlash();
                 renderAll();
+                renderRoomView();
                 toast('↩ Te retiras: ' + (m.reason || ''));
             }
         });
@@ -366,6 +409,10 @@
             S.boxEmpty = true;
             if (ROLE === 'puppet') toast('🎁 ¡LA CAJA ESTÁ AGOTADA! Pulsa [E] para SALIR', 6000);
         });
+        // v2: la marioneta (IA) va de camino — tensión para todos
+        c.on('boxWarning', () => {
+            toast('🎁 La Marioneta ha salido de su caja…', 4000);
+        });
         c.on('puppetOut', () => {
             if (ROLE === 'puppet') toast('🎁 ¡ESTÁS SUELTA! Avanzas sola hacia la oficina…', 5000);
         });
@@ -374,6 +421,7 @@
             hideWait();
             $('doorbanner').style.display = 'none';
             $('stunbar').style.display = 'none';
+            renderRoomView();
             if (m.by === ROLE) {
                 showScreen('¡ATRAPEASTE AL GUARDIA!<div class="big">💀 ' + (m.byName || '') + ' GANA</div><div class="sub">' + (m.reason || '') + '</div>', 'lose');
             } else {
@@ -384,7 +432,12 @@
             S.phase = 'win';
             hideWait();
             $('doorbanner').style.display = 'none';
+            renderRoomView();
             showScreen('🌅 6 AM<div class="big">SOBREVIVIERON A LA NOCHE ' + (m.night || S.night) + '</div><div class="sub">el guardia sigue vivo… de momento</div>', 'win');
+        });
+        // v2: reloj REAL del host
+        c.on('hour', (m) => {
+            if (typeof m.hour === 'number') S.hour = m.hour;
         });
         c.on('__disconnect', () => {
             if (S.phase === 'night') {
@@ -410,6 +463,7 @@
         $('h-night').textContent = 'NOCHE ' + S.night;
         paintMap();
         renderNav();
+        renderRoomView();
         $('cd-jump').textContent = S.inOffice ? (ROLE === 'bb' ? '¡roba y corre!' : '¡AHORA! antes de la máscara') : 'solo en la OFICINA';
         $('ab-jump').disabled = !S.inOffice || S.phase !== 'night';
         // habilidad [Q]: recarga en vivo
@@ -454,19 +508,19 @@
         q.disabled = S.phase !== 'night' || left > 0;
         cdq.textContent = left > 0 ? 'recarga ' + Math.ceil(left / 1000) + 's' : ABILITIES[ROLE].desc;
     }
-    // reloj decorado
+    // reloj del HOST (v2: real, no decorativo)
     setInterval(() => {
         if (S.phase !== 'night') return;
-        const h = ['12:00', '1:00', '2:00', '3:00', '4:00', '5:00'][Math.min(5, Math.floor((Date.now() % 3600000) / 600000))];
-        $('h-hour').textContent = h + ' AM';
+        $('h-hour').textContent = (S.hour === 12 ? '12' : S.hour) + ':00 AM';
     }, 1000);
 
     // ------------------- Arranque -------------------
-    window.__A = { S, ROLES, ROOM_NAME, ADJACENCY, send, tryMove, tryJumpscare, trySpecial, ABILITIES };
+    window.__A = { S, ROLES, ROOM_NAME, ADJACENCY, send, tryMove, tryJumpscare, trySpecial, ABILITIES, renderRoomView };
     setRoleUI();
     buildMap();
     paintMap();
     renderAll();
+    renderRoomView();
     // esperar a PeerJS
     let waited = 0;
     const iv = setInterval(() => {

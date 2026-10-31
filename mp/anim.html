@@ -12,6 +12,40 @@
             font-family: monospace;
         }
 
+        /* v2 · vista de sala (ojos del animatrónico) */
+        #roomview {
+            position: fixed; inset: 0; z-index: 1; overflow: hidden;
+            background: #030304;
+        }
+        #roomimg {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 104vw; min-height: 104vh; object-fit: cover;
+            filter: brightness(.72) contrast(1.18) saturate(.85);
+            animation: roompan 26s ease-in-out infinite alternate;
+        }
+        @keyframes roompan {
+            0% { transform: translate(-52%, -50%) scale(1.02); }
+            100% { transform: translate(-48%, -50%) scale(1.06); }
+        }
+        #roomtint {
+            position: absolute; inset: 0;
+            background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,.62) 100%);
+        }
+        #roomview.office #roomtint {
+            background: radial-gradient(ellipse at center, rgba(60,0,0,.18) 45%, rgba(20,0,0,.75) 100%);
+        }
+        #roomlabel {
+            position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
+            font-size: 11px; letter-spacing: 3px; color: rgba(207,207,207,.45);
+        }
+        /* destello de estática al cambiar de sala */
+        #staticflash {
+            position: fixed; inset: 0; z-index: 45; display: none; pointer-events: none;
+            background: repeating-conic-gradient(#999 0% .2%, #000 .2% .45%) 0 0/48px 48px;
+            opacity: .9;
+        }
+
         /* fondo CRT con grano + scanlines */
         #crt {
             position: fixed; inset: 0; pointer-events: none; z-index: 40;
@@ -151,6 +185,15 @@
 </head>
 
 <body>
+    <!-- v2 · VISTA DE SALA: lo que el animatrónico "ve" desde su sala
+         (imagen real del juego + pan lento). Va debajo del HUD/CRT -->
+    <div id="roomview">
+        <img id="roomimg" alt="">
+        <div id="roomtint"></div>
+        <div id="roomlabel"></div>
+    </div>
+    <div id="staticflash"></div>
+
     <div id="grain"></div>
     <div id="crt"></div>
 
@@ -224,7 +267,7 @@
         })();
     </script>
     <script src="net.js"></script>
-    <script src="anim-game.js?v=4"></script>
+    <script src="anim-game.js?v=5"></script>
 </body>
 
 </html>

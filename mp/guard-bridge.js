@@ -1,7 +1,26 @@
 // ============================================================
-// THE LOST PIZZERIA — Puente del GUARDIA (v3)
+// THE LOST PIZZERIA — Puente del GUARDIA (v4)
 // Se carga en 2/index.html SOLO cuando ?mp=<CODIGO> existe.
 // Sin el parámetro, el juego queda 100% original (un jugador).
+//
+// v4 (pantallas arregladas):
+//   · OFICINA VISIBLE: el sprite "blackout" del demo nace ROTO con el
+//     runtime 291 + datos 292 y cubre la pantalla de negro opaco. Se
+//     destierra fuera de pantalla cada 500ms — la oficina (escritorio,
+//     ventilador, pasillo) renderiza NATIVA y la linterna (CTRL) funciona.
+//   · CÁMARAS 100% OPERATIVAS (fix "NO SIGNAL"): el monitor nativo no
+//     dibuja sus vistas con 291+292 (pantalla blanca / signal out). Un
+//     overlay HTML sustituye la vista en vivo: imagen real de la sala
+//     (verificada del propio juego), ocupantes, mapa clicable para cambiar
+//     de cámara (escribe el contador nativo 'viewing') y botón para bajar
+//     el monitor. La CÁM 11 enseña la barra de la caja musical.
+//   · CAJA MUSICAL SIN MUERTE SORPRESA: sin marioneta jugadora ya NO hay
+//     kill a los 4s de caja vacía — hay AVISO + ventana de gracia (20s)
+//     para dar cuerda; solo si se sigue sin cuerda la IA la manda. Con
+//     marioneta jugadora el kill lo decide ella (igual que antes).
+//     Esto mata el bucle muerte→gameover→menú→reinicio que el guardia
+//     veía como "parpadeo negro constante".
+//   · Barra de la caja en ROJO PARPADEANTE por debajo del 25%.
 //
 // v3 (The Lost Pizzeria):
 //   · CORTINA MP sobre el menú nativo: el menú del demo es ilegible
@@ -54,7 +73,7 @@
     const ROOM = params.get('mp');
     if (!ROOM) return; // un jugador: no hacer nada
 
-    const BRIDGE_VERSION = 'v3-the-lost-pizzeria';
+    const BRIDGE_VERSION = 'v4-pantallas-ok';
     try { console.log('[MP] guard-bridge ' + BRIDGE_VERSION); } catch (e) { }
 
     const MY_NAME = params.get('name') || 'Guardia';
@@ -121,6 +140,24 @@
         puppet: 'LA MARIONETA', w_freddy: 'FREDDY DESTROZADO',
         w_bonnie: 'BONNIE DESTROZADO', w_chica: 'CHICA DESTROZADA', w_foxy: 'FOXY DESTROZADO'
     };
+    // v4: imágenes de sala VERIFICADAS del propio juego (banco de imágenes)
+    // para el overlay de cámaras del guardia
+    const ROLE_IMG = {
+        toy_freddy: 'toy_freddy.png', toy_bonnie: 'toy_bonnie.png', toy_chica: 'toy_chica.png',
+        mangle: 'toy_foxy.png', bb: 'BB.png', puppet: 'gold_freddy.png',
+        w_freddy: 'freddy.png', w_bonnie: 'bonnie.png', w_chica: 'chica.png', w_foxy: 'foxy.png'
+    };
+    const ROOM_IMG = {
+        cam1: 'assets/cams/cam01.jpg', cam2: 'assets/cams/cam02.jpg', cam3: 'assets/cams/cam03.jpg',
+        cam4: 'assets/cams/cam04.jpg', cam5: 'assets/cams/cam05.jpg', cam6: 'assets/cams/cam06.jpg',
+        cam7: 'assets/cams/cam07.jpg', cam8: 'assets/cams/cam08.jpg', cam9: 'assets/cams/cam09.jpg',
+        cam10: 'assets/cams/cam10.jpg', cam11: 'assets/cams/cam11.jpg', cam12: 'assets/cams/cam12.jpg'
+    };
+    // número del contador 'viewing' → sala (las cámaras nativas son 1..12)
+    const VIEWING_TO_ROOM = {};
+    for (let n = 1; n <= 12; n++) VIEWING_TO_ROOM[n] = 'cam' + n;
+    // qué salas se ven en cada cámara (el pasillo principal cubre el tramo 1)
+    const CAM_COVERS = { cam7: ['cam7', 'hall1'] };
     // contadores de IA que hay que congelar (todos, en ambos sets)
     const AI_COUNTERS = [
         'freddy AI', 'bonie AI', 'chica AI', 'foxy AI', 'BB AI',
@@ -144,6 +181,7 @@
     const STUN_MAX = 2;
     const STUN_CD_MS = 12000;
     const BOX_KILL_MS = 4000;     // marioneta: caja agotada → ventana de kill
+    const BOX_GRACE_MS = 20000;   // v4: sin marioneta jugadora → gracia para dar cuerda
     const HOUR_MS = 70000;        // cada hora del MP dura 70s (noche ~7min)
     const NIGHT_FRAME = 3;        // frame del juego = la noche
 
@@ -293,6 +331,23 @@
         setTimeout(() => canvas.dispatchEvent(mk('pointerup', 0)), 90);
     }
 
+    // ---------------------------------------------------------
+    // v4 · DESTIERRO DEL "blackout": el sprite nace roto (runtime 291
+    // + datos 292) y cubre la oficina de negro opaco. Fuera de pantalla
+    // la oficina renderiza nativa (escritorio, ventilador, pasillo,
+    // linterna CTRL). Se llama del estabilizador cada 500ms.
+    // ---------------------------------------------------------
+    function banishBlackout() {
+        const bo = find('blackout');
+        if (!bo) return;
+        // dentro de la ventana (con margen por el pan) → desterrar
+        if (bo.hoX > -400 || bo.hoY > -400) {
+            bo.hoX = -3000;
+            bo.hoY = -3000;
+            if (bo.rom) bo.rom.rmMangle = 1;   // fuerza re-creación del sprite
+        }
+    }
+
 
     // ---------------------------------------------------------
     // El INIT nativo de la noche (grupo con ~11 acciones seguidas de
@@ -420,6 +475,169 @@
         t.style.display = 'block';
         clearTimeout(t.__t);
         t.__t = setTimeout(() => { t.style.display = 'none'; }, ms || 3500);
+    }
+
+    // ---------------------------------------------------------
+    // v4 · OVERLAY DE CÁMARAS (fix "NO SIGNAL")
+    // El monitor nativo no dibuja sus vistas con el runtime 291 +
+    // datos 292 (pantalla blanca). Este overlay lee el estado nativo
+    // (botón flip + contador 'viewing') y muestra la vista en HTML:
+    // imagen real de la sala, ocupantes, mapa clicable y botón para
+    // bajar el monitor. Cambiar de cámara escribe el contador nativo
+    // para que la lógica del juego (caja musical en CÁM 11, etc.)
+    // siga funcionando.
+    // ---------------------------------------------------------
+    const CAM_NUM_NAME = {
+        1: 'SALA DE FIESTAS 1', 2: 'SALA DE FIESTAS 2', 3: 'SALA DE FIESTAS 3', 4: 'SALA DE FIESTAS 4',
+        5: 'CONDUCTO DE AIRE IZQ.', 6: 'CONDUCTO DE AIRE DER.', 7: 'PASILLO PRINCIPAL', 8: 'REFACCIONES',
+        9: 'ESCENARIO', 10: 'ÁREA DE JUEGOS', 11: 'RINCÓN DE PREMIOS', 12: 'CAVERNA DEL NIÑO'
+    };
+    let camOverlay = null, camShown = -1;
+
+    function ensureCamOverlay() {
+        if (camOverlay) return;
+        const d = document.createElement('div');
+        d.id = 'mp-cams';
+        d.style.cssText = 'position:fixed;inset:0;z-index:8000;display:none;pointer-events:none;background:#020203;font-family:monospace';
+        d.innerHTML =
+            '<div id="mp-cam-imgwrap" style="position:absolute;inset:0;overflow:hidden">' +
+            '<img id="mp-cam-img" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);min-width:100vw;min-height:100vh;object-fit:cover;filter:brightness(.82) contrast(1.12) saturate(.9)">' +
+            '<div style="position:absolute;inset:0;background:repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 4px)"></div>' +
+            '<div id="mp-cam-vig" style="position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)"></div>' +
+            '<div id="mp-cam-burst" style="position:absolute;inset:0;display:none;background:repeating-conic-gradient(#888 0% .25%,#000 .25% .5%) 0 0/64px 64px;opacity:.85;mix-blend-mode:screen"></div>' +
+            '</div>' +
+            '<div style="position:absolute;top:18px;left:50%;transform:translateX(-50%);text-align:center">' +
+            '<div id="mp-cam-title" style="font-size:22px;font-weight:bold;letter-spacing:4px;color:#e8e6df;text-shadow:0 0 12px rgba(255,255,255,.4)">CÁM 09</div>' +
+            '<div id="mp-cam-sub" style="font-size:12px;letter-spacing:3px;color:#9aa;margin-top:4px">ESCENARIO</div>' +
+            '</div>' +
+            '<div style="position:absolute;top:18px;left:18px;font-size:12px;color:#ff5d5d;letter-spacing:2px">' +
+            '<span id="mp-cam-rec">●</span> REC · <span id="mp-cam-clock">12 AM</span> · NOCHE <span id="mp-cam-night">1</span>' +
+            '</div>' +
+            '<div id="mp-cam-occ" style="position:absolute;bottom:120px;left:50%;transform:translateX(-50%);display:flex;gap:18px;align-items:flex-end"></div>' +
+            // CÁM 11: barra de la caja musical
+            '<div id="mp-cam-box" style="position:absolute;bottom:190px;left:50%;transform:translateX(-50%);display:none;text-align:center">' +
+            '<div style="font-size:12px;color:#e8d6fe;letter-spacing:2px">🎵 CAJA MUSICAL — <span id="mp-cam-boxpct">100%</span></div>' +
+            '<div style="width:260px;height:10px;background:#120a18;border:1px solid #4a3a5a;margin-top:4px"><div id="mp-cam-boxbar" style="height:100%;width:100%;background:#e8d6fe"></div></div>' +
+            '<div style="font-size:10px;color:#8a7a9a;margin-top:3px">DAR CUERDA: botón abajo-izquierda (mantener)</div>' +
+            '</div>' +
+            // mapa de cámaras clicable
+            '<div id="mp-cam-map" style="position:absolute;right:16px;bottom:16px;pointer-events:auto;background:rgba(4,6,10,.88);border:1px solid #2c3140;padding:10px"></div>' +
+            // bajar monitor
+            '<button id="mp-cam-down" style="position:absolute;left:50%;bottom:14px;transform:translateX(-50%);pointer-events:auto;background:#123;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;font-size:15px;letter-spacing:2px;padding:10px 26px;cursor:pointer;border-radius:6px">▼ BAJAR MONITOR</button>';
+        document.body.appendChild(d);
+        camOverlay = d;
+
+        // mapa: botones CÁM 01..12
+        const map = d.querySelector('#mp-cam-map');
+        const layout = [
+            [8, 3, 7], [1, 5, 9, 11], [4, 2, 6, 10, 12]
+        ];
+        map.innerHTML = '<div style="font-size:10px;color:#667;letter-spacing:2px;margin-bottom:6px">CÁMARAS — PULSA PARA VER</div>';
+        layout.forEach(row => {
+            const r = document.createElement('div');
+            r.style.cssText = 'display:flex;gap:4px;margin-bottom:4px';
+            row.forEach(n => {
+                const b = document.createElement('button');
+                b.id = 'mp-cambtn-' + n;
+                b.textContent = ('0' + n).slice(-2);
+                b.style.cssText = 'width:38px;height:30px;font-family:monospace;font-weight:bold;font-size:12px;background:#0d1017;color:#7d8494;border:1px solid #2c3140;cursor:pointer';
+                b.addEventListener('click', () => switchCam(n));
+                r.appendChild(b);
+            });
+            map.appendChild(r);
+        });
+
+        d.querySelector('#mp-cam-down').addEventListener('click', () => {
+            const fp = find('flip panel button');
+            if (fp) gameClick(fp.hoX, fp.hoY);
+        });
+    }
+
+    function switchCam(n) {
+        if (n < 1 || n > 12) return;
+        setRS('viewing', n);
+        setRS('last viewed', n);
+        camBurst();
+    }
+
+    function camBurst() {
+        const b = document.getElementById('mp-cam-burst');
+        if (!b) return;
+        b.style.display = 'block';
+        clearTimeout(b.__t);
+        b.__t = setTimeout(() => { b.style.display = 'none'; }, 260);
+    }
+
+    function occupantsHtml(roomIds) {
+        const occ = [];
+        Object.keys(MARKER).forEach(role => {
+            const p = state.players[role];
+            const room = p ? p.room : START_ROOM[role];
+            if (roomIds.indexOf(room) !== -1) {
+                occ.push({ role, player: p ? p.name : null });
+            }
+        });
+        if (!occ.length) return '';
+        return occ.map(o =>
+            '<div style="text-align:center;pointer-events:none">' +
+            '<img src="' + MP_URL + 'assets/roles/' + ROLE_IMG[o.role] + '" style="width:74px;height:74px;object-fit:contain;filter:drop-shadow(0 0 10px rgba(255,255,255,.25))">' +
+            '<div style="font-size:10px;letter-spacing:1px;margin-top:3px;color:' + (o.player ? '#ffd34d' : '#5a6272') + '">' +
+            ROLE_NAME[o.role] + (o.player ? '' : ' · IA') + '</div></div>'
+        ).join('');
+    }
+
+    function updateCamOverlay() {
+        ensureCamOverlay();
+        const a = app();
+        const active = !!(a && a.currentFrame === NIGHT_FRAME && state.phase === 'night');
+        let open = false, viewing = 0;
+        if (active) {
+            const fp = find('flip panel button');
+            open = !!(fp && fp.rov && fp.rov.rvValues && fp.rov.rvValues[0] === 1);
+            viewing = rs('viewing') || 0;
+        }
+        if (!open || !viewing) {
+            if (camShown !== -1) { camOverlay.style.display = 'none'; camShown = -1; }
+            return;
+        }
+        const roomId = VIEWING_TO_ROOM[viewing] || ('cam' + viewing);
+        if (camShown !== viewing) {
+            camShown = viewing;
+            camBurst();
+            const img = document.getElementById('mp-cam-img');
+            if (img) img.src = MP_URL + (ROOM_IMG[roomId] || ROOM_IMG.cam9);
+            document.getElementById('mp-cam-title').textContent = 'CÁM ' + ('0' + viewing).slice(-2);
+            document.getElementById('mp-cam-sub').textContent = CAM_NUM_NAME[viewing] || ROOM_NAME[roomId] || '';
+        }
+        camOverlay.style.display = 'block';
+        // reloj/noche/REC
+        document.getElementById('mp-cam-night').textContent = state.night;
+        document.getElementById('mp-cam-clock').textContent = (state.mpHour === 12 ? '12' : state.mpHour) + ' AM';
+        // ocupantes (con refresco: los jugadores se mueven)
+        const covers = CAM_COVERS[roomId] || [roomId];
+        document.getElementById('mp-cam-occ').innerHTML = occupantsHtml(covers);
+        // CÁM 11: barra de la caja
+        const boxWrap = document.getElementById('mp-cam-box');
+        if (viewing === 11) {
+            boxWrap.style.display = 'block';
+            const pct = Math.max(0, Math.round(state.boxLevel / BOX_MAX * 100));
+            const bar = document.getElementById('mp-cam-boxbar');
+            bar.style.width = pct + '%';
+            bar.style.background = pct < 25 ? '#ff5b5b' : (pct < 50 ? '#ffb84d' : '#e8d6fe');
+            document.getElementById('mp-cam-boxpct').textContent = pct + '%';
+        } else {
+            boxWrap.style.display = 'none';
+        }
+        // botón activo del mapa
+        for (let n = 1; n <= 12; n++) {
+            const b = document.getElementById('mp-cambtn-' + n);
+            if (b) {
+                const on = (n === viewing);
+                b.style.background = on ? '#3d80ff' : '#0d1017';
+                b.style.color = on ? '#fff' : '#7d8494';
+                b.style.borderColor = on ? '#7ec8ff' : '#2c3140';
+            }
+        }
     }
 
     // ---------------------------------------------------------
@@ -943,7 +1161,7 @@
             '<div id="mp-curt-sub" style="font-size:12px;color:#9a9a9a;margin-bottom:20px">comparte el código con tus amigos</div>' +
             '<div id="mp-curt-players" style="font-size:12px;color:#9db8d8;margin-bottom:20px;line-height:1.7">nadie más conectado — los animatrónicos pueden unirse</div>' +
             '<button id="mp-curt-start" style="background:#032;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;font-size:18px;letter-spacing:2px;padding:14px 36px;cursor:pointer;border-radius:6px">▶ EMPEZAR NOCHE</button>' +
-            '<div style="font-size:11px;color:#7d7d7d;margin-top:16px;line-height:1.7">El menú individual y la CUSTOM NIGHT quedan desactivados en multijugador.<br>Máscara [abajo-izq] · linterna · cámaras · caja musical · ⚡DESTELLO [F]</div>' +
+            '<div style="font-size:11px;color:#7d7d7d;margin-top:16px;line-height:1.7">El menú individual y la CUSTOM NIGHT quedan desactivados en multijugador.<br>Linterna: mantén <b>CTRL</b> · máscara [abajo-izq] · cámaras (mapa clicable) · caja musical · ⚡DESTELLO [F]</div>' +
             '</div>';
         document.body.appendChild(c);
         document.getElementById('mp-curt-start').addEventListener('click', function () {
@@ -1126,6 +1344,7 @@
         state.boxBlockedUntil = 0;
         state.boxRushUntil = 0;
         state.boxLastTick = Date.now();
+        state.boxGraceAt = 0;      // v4: ventana de gracia de la caja
         state.specialAt = {};
         state.sprintUntil = {};
         state.batteryBlockUntil = 0;
@@ -1159,6 +1378,7 @@
                         disableNightInitEvents();
                         disableMusicBoxWriters();
                         disableNativeMarkerMovers();
+                        banishBlackout();   // v4: oficina visible desde el tick 1
                     } catch (e) { }
                 }
             };
@@ -1183,6 +1403,7 @@
                 setRS('time left', 99999999);
                 setRS('night number', state.night);
                 Object.keys(START_ROOM).forEach(role => { tpMarker(role, START_ROOM[role]); });
+                banishBlackout();   // v4: durante el arranque también
                 if (Date.now() > (state.stabilizeUntil || 0)) clearInterval(tight);
             }, 50);
         }, 50);
@@ -1202,6 +1423,7 @@
         setRS('battery life', 9999);
         disableMusicBoxWriters();
         disableNativeMarkerMovers();
+        banishBlackout();   // v4: oficina visible
         // marcadores a sus salas de inicio
         Object.keys(START_ROOM).forEach(role => {
             tpMarker(role, START_ROOM[role]);
@@ -1217,6 +1439,8 @@
                 const aa = app();
                 if (!aa || aa.currentFrame !== NIGHT_FRAME) return;
                 const now = Date.now();
+                // v4: el blackout no puede volver a cubrir la oficina
+                banishBlackout();
                 AI_COUNTERS.forEach(n => { if (rs(n) !== 0) setRS(n, 0); });
                 if (rs('time left') !== null && rs('time left') < 90000000) setRS('time left', 99999999);
                 if (rs('time allowed') !== null && rs('time allowed') < 90000000) setRS('time allowed', 99999999);
@@ -1273,23 +1497,50 @@
                 if (wb) {
                     wb.disabled = blocked;
                     wb.style.opacity = blocked ? '.45' : '1';
-                    wb.textContent = blocked ? '🎈 GLOBOS (' + Math.ceil((state.boxBlockedUntil - now) / 1000) + 's)' : '🎵 DAR CUERDA (mantener)';
+                    if (blocked) {
+                        wb.textContent = '🎈 GLOBOS (' + Math.ceil((state.boxBlockedUntil - now) / 1000) + 's)';
+                        wb.style.background = '#123';
+                    } else if (state.boxGraceAt) {
+                        wb.textContent = '🎵 ¡DAR CUERDA YA! (' + Math.ceil((BOX_GRACE_MS - (now - state.boxGraceAt)) / 1000) + 's)';
+                        wb.style.background = '#5a0a0a';
+                    } else {
+                        wb.textContent = '🎵 DAR CUERDA (mantener)';
+                        wb.style.background = '#123';
+                    }
+                }
+                // v4: barra en ROJO PARPADEANTE cuando queda <25%
+                const wrap = document.getElementById('mp-box-wrap');
+                if (wrap) {
+                    const danger = pct < 25;
+                    wrap.classList.toggle('mp-box-danger', danger);
+                    wrap.style.animation = danger ? 'mpboxblink .8s steps(2) infinite' : 'none';
                 }
                 if (state.boxLevel <= 0 && !state.boxEmptyAt) {
                     state.boxEmptyAt = now;
+                    state.boxGraceAt = 0;
                     broadcast({ t: 'boxEmpty' });
-                    toast('🎁 ¡CAJA MUSICAL AGOTADA! La Marioneta puede escapar');
+                    toast('🎁 ¡CAJA MUSICAL AGOTADA! Da cuerda YA — la Marioneta se acerca', 6000);
                 } else if (state.boxLevel > 200 && state.boxEmptyAt) {
                     state.boxEmptyAt = 0;
+                    state.boxGraceAt = 0;
                     broadcast({ t: 'boxRefilled' });
                 }
-                // canon: la caja vacía 4s seguidos sin cuerda → la marioneta
-                // (IA o jugadora) mata al guardia
+                // canon: la caja vacía sin cuerda → la marioneta sale a por el
+                // guardia. v4: con marioneta JUGADORA lo decide ella (kill al
+                // entrar). Sin marioneta jugadora hay AVISO + ventana de gracia
+                // (20s) para dar cuerda: sin la gracia la noche moría a los ~92s
+                // y el bucle muerte→menú→reinicio era el "parpadeo negro".
                 if (state.boxEmptyAt && now - state.boxEmptyAt > BOX_KILL_MS && !state.killDone) {
                     if (state.players.puppet && state.players.puppet.room !== 'office') {
                         // hay marioneta JUGADORA: ella ejecuta el kill al entrar
                     } else {
-                        killGuard('puppet', 'la caja musical se agotó… LA MARIONETA salió');
+                        if (!state.boxGraceAt) {
+                            state.boxGraceAt = now;
+                            toast('⚠ LA MARIONETA SE ACERCA — ¡DAR CUERDA! (' + Math.round(BOX_GRACE_MS / 1000) + 's)', 8000);
+                            broadcast({ t: 'boxWarning' });
+                        } else if (now - state.boxGraceAt > BOX_GRACE_MS) {
+                            killGuard('puppet', 'la caja musical se agotó… LA MARIONETA salió');
+                        }
                     }
                 }
                 if (now - (state.__boxBcast || 0) > 2000) {
@@ -1339,6 +1590,15 @@
         ensureGuardUI();
         showCurtain();
         gline('sala ' + ROOM + ' · juego listo');
+        // v4: animación del parpadeo de la caja + bucle del overlay de cámaras
+        try {
+            const st = document.createElement('style');
+            st.textContent = '@keyframes mpboxblink{0%{box-shadow:0 0 0 1px #ff5b5b}50%{box-shadow:0 0 14px 3px rgba(255,60,60,.9)}}';
+            document.head.appendChild(st);
+        } catch (e) { }
+        if (!window.__mpCamPoll) {
+            window.__mpCamPoll = setInterval(updateCamOverlay, 150);
+        }
         // MP: neutralizar la pausa por foco (blur) — la noche compartida
         // no se detiene aunque el guardia cambie de ventana
         try {

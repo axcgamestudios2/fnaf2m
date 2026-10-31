@@ -6,6 +6,38 @@ Misma metodología que [fnafm](https://github.com/axcgamestudios2/fnafm).
 
 **▶ JUGAR: https://axcgamestudios2.github.io/fnaf2m/**
 
+## v4 — pantallas arregladas (oficina visible · cámaras operativas · sin bucle de muerte)
+
+- **OFICINA VISIBLE (fix del «todo parpadeando en negro»)**: el sprite
+  `blackout` del demo nace ROTO con el runtime 291 + datos 292 y cubre la
+  pantalla de negro opaco. El bridge lo destierra fuera de pantalla cada
+  500 ms → la oficina renderiza NATIVA (escritorio, ventilador, poster
+  CELEBRATE, pasillo) y la **linterna (mantén CTRL)** funciona de verdad.
+- **CÁMARAS 100% OPERATIVAS (fix del «NO SIGNAL»)**: el monitor nativo no
+  dibuja sus vistas con 291+292 (pantalla blanca). Un **overlay HTML** lee
+  el estado nativo (botón flip + contador `viewing`) y muestra la vista en
+  vivo: **imagen real de la sala** (verificada del propio banco de imágenes
+  del juego), **ocupantes con su icono** (jugadores en dorado, IA en gris),
+  **mapa clicable** CÁM 01–12 para cambiar de cámara y botón **▼ BAJAR
+  MONITOR**. La CÁM 11 enseña la barra de la caja musical en vivo.
+- **CAJA MUSICAL SIN MUERTE SORPRESA (fix del bucle muerte→reinicio)**: sin
+  marioneta jugadora ya NO hay kill a los 4 s de caja vacía: hay **aviso +
+  ventana de gracia de 20 s** («¡DAR CUERDA YA!» con cuenta atrás) y solo
+  si se sigue sin cuerda la IA la manda. Con marioneta jugadora el kill lo
+  decide ella. La barra pasa a **rojo parpadeante** por debajo del 25%.
+  Antes la noche moría a los ~92 s y el guardía veía el bucle
+  gameover→menú→reinicio como «parpadeo negro constante».
+- **ANIMATRÓNICOS QUE VEN (fix de «solo tienen su pantalla en negro»)**: la
+  interfaz del animatrónico ahora muestra **la sala real en la que está**
+  (imagen verificada del juego con pan lento + CRT/estática + destello de
+  estática al moverse). En la oficina la vista pasa a tono rojo de peligro.
+- **Reloj REAL**: el HUD del animatrónico muestra la hora del HOST (antes
+  era un reloj decorativo falso).
+- E2E verificado: noche estable >4 min (hora 2+) sin reinicios, dar cuerda
+  salva la noche tras el aviso, marcadores nativos moviéndose en vivo,
+  ocupantes en cámaras, kill por jumpscare, revancha sin recargar y CUSTOM
+  NIGHT bloqueada.
+
 ## v3 — The Lost Pizzeria (rebranding + anti-glitches)
 
 - **Rebranding completo**: todo el texto visible dice ahora **The Lost Pizzeria**
@@ -57,7 +89,8 @@ Misma metodología que [fnafm](https://github.com/axcgamestudios2/fnafm).
   (`office occupied=1`); si el guardia no se máscara en 3s o el animatrónico
   pulsa JUMPSCARE [ESP], muere. Con máscara puesta, el animatrónico se retira.
 - **La Marioneta** escapa cuando la caja musical se agota ([E] para salir si
-  la llevas tú; si es IA, mata a los 4s de caja vacía); **Balloon Boy** no
+  la llevas tú; si es IA, aviso + 20 s de gracia para dar cuerda y solo
+  entonces mata); **Balloon Boy** no
   mata: roba la linterna 40s.
 - **⚡ DESTELLO** del guardia [F]: aturde a todos 5s y echa a los acampadores
   de la oficina (2 cargas, +1 por hora, cooldown 12s).
