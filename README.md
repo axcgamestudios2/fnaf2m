@@ -1,10 +1,45 @@
-# FNAF 2 — Multijugador (fnaf2m)
+# The Lost Pizzeria — Multijugador (fnaf2m)
 
-**Five Nights at Freddy's 2 multijugador** — hasta 11 jugadores (1 guardia + 10
-animatrónicos) sobre el juego original de Clickteam Fusion. Misma metodología
-que [fnafm](https://github.com/axcgamestudios2/fnafm) (FNAF 1 MP).
+**The Lost Pizzeria** — multijugador de terror para hasta 11 jugadores
+(1 guardia + 10 animatrónicos) sobre el juego original de Clickteam Fusion.
+Misma metodología que [fnafm](https://github.com/axcgamestudios2/fnafm).
 
 **▶ JUGAR: https://axcgamestudios2.github.io/fnaf2m/**
+
+## v3 — The Lost Pizzeria (rebranding + anti-glitches)
+
+- **Rebranding completo**: todo el texto visible dice ahora **The Lost Pizzeria**
+  (títulos de las páginas, logo del launcher/lobby/carga regenerado, cortina
+  del guardia, UI del animatrónico). Sin «Five Nights at Freddy's» en ninguna
+  pantalla.
+- **CORTINA MP sobre el menú nativo**: el menú del demo es ilegible (sus textos
+  no renderizan con el runtime 291 + datos 292: logo y botones invisibles, solo
+  se ve el parpadeo en negro) y lleva a pantallas rotas. En multijugador el
+  guardia ve una cortina con el código de sala, los conectados y **▶ EMPEZAR
+  NOCHE** — el menú nativo queda inaccesible (y sin parpadeos).
+- **CUSTOM NIGHT desactivada**: el frame `customize` (12) se bloquea y devuelve
+  al menú al instante, tanto en multijugador (watchdog del bridge) como en un
+  jugador (mini-guardián en `2/index.html`). Ya no se ofrece «para empezar».
+- **Arranque de noche FIABLE**: la autoridad de frames vive en un watchdog
+  permanente (200 ms) que fuerza el frame de la noche **sin tope de tiempo**.
+  v2 lo intentaba 20 s y se rendía: el demo seguía su propio guion (modo
+  atracción, `new bonnie`/`new chica` dentro de la oficina, corte a 80 s) y el
+  guardia veía parpadeos en negro mientras el overlay mentía («noche en
+  marcha»). Ahora la noche MP siempre aterriza estabilizada.
+- **Animatrónicos con pantalla VIVA**: la espera deja de ser una pantalla negra
+  total — banner compacto sobre el HUD/mapa/compañeros visibles. La noche
+  arranca de verdad (nightStart real) y al terminar hay **REVANCHA** sin
+  recargar (mensaje `toLobby` + cortina de revancha del guardia).
+- **FIX DEL CONGELAMIENTO aleatorio** (el «super glitcheado»): el bucle del
+  juego es una cadena de `setTimeout` que se auto-reprograma AL FINAL del
+  dibujo. Con el runtime 291 + datos 292, a veces un fondo sin decodificar a
+  tiempo hace que `drawImage` lance una excepción → la cadena MUERE → juego
+  congelado (frame 0 eterno, noches colgadas). **Estabilizador siempre
+  activo** en `2/index.html`: envuelve `stepApplication` — el tick fallido
+  se salta, pero el bucle sigue vivo (y un vigilante lo re-programa si
+  muere). Además el juego ya **no se pausa al perder el foco** de la
+  ventana (el demo original se congelaba con `window.blur`): la noche
+  compartida nunca se detiene.
 
 ## Cómo funciona
 
@@ -72,17 +107,24 @@ la **Marioneta** en el Rincón de premios. El ritmo acelera con las noches
 ## Estructura
 
 ```
-2/            El juego FNAF 2 original (demo "FiveNights2NOHACKS")
+2/            El juego original (demo "FiveNights2NOHACKS")
 2/index.html  + hook del guard-bridge (solo activo con ?mp=)
+              + guardián anti-custom-night (siempre activo)
 mp/           net.js · lobby.html/js · anim.html/anim-game.js · guard-bridge.js
 ```
 
 ## Notas técnicas
 
-- El FNAF 2 venía con el `Runtime.js` MINIFICADO (build 292.24): sin nombres
-  internos no se puede pilotar. Se sustituye por el Runtime.js SIN MINIFICAR
-  del FNAF 1 (build 291.2) + 2 parches de compatibilidad con los datos 292
-  (parámetro 68 y evaluación de condiciones sin tokens).
+- El juego original venía con el `Runtime.js` MINIFICADO (build 292.24): sin
+  nombres internos no se puede pilotar. Se sustituye por el Runtime.js SIN
+  MINIFICAR del FNAF 1 (build 291.2) + 2 parches de compatibilidad con los
+  datos 292 (parámetro 68 y evaluación de condiciones sin tokens).
+- **El menú nativo no renderiza sus textos** con esa combinación de runtime y
+  datos (logo y botones invisibles → pantalla que solo parpadea en negro):
+  por eso el multijugador lo sustituye con la cortina MP.
+- Mapa de frames del demo (ingeniería inversa): `0` splash · `2` "what day" ·
+  `3` **la noche** · `12` "customize" (custom night, BLOQUEADA) · `13` "dream"
+  (menú) · `14/15` "error" (glitch) · `4` static · `5` next day · `6` gameover.
 - El demo corta la noche a los 80 segundos (`time allowed`): en MP se
   neutraliza; las horas las marca el host (70s/hora ≈ noche de 7 minutos).
 - **Muerte aleatoria resuelta de raíz**: el guion del demo mueve los

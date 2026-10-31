@@ -1,7 +1,22 @@
 // ============================================================
-// FNAF 2 MP — Puente del GUARDIA (v1)
+// THE LOST PIZZERIA — Puente del GUARDIA (v3)
 // Se carga en 2/index.html SOLO cuando ?mp=<CODIGO> existe.
 // Sin el parámetro, el juego queda 100% original (un jugador).
+//
+// v3 (The Lost Pizzeria):
+//   · CORTINA MP sobre el menú nativo: el menú del demo es ilegible
+//     (sus textos no renderizan con el runtime 291 + datos 292) y
+//     lleva a pantallas rotas. En MP se sustituye por una cortina con
+//     ▶ EMPEZAR NOCHE — el guardia ya no pelea con el menú nativo.
+//   · WATCHDOG de autoridad de frames (200ms): el arranque de la
+//     noche ya no depende de una ventana de 20s — el frame 3 se
+//     fuerza SIEMPRE hasta que llegue. El splash (0) se salta solo.
+//   · CUSTOM NIGHT (frame "customize") BLOQUEADA en multijugador:
+//     el watchdog devuelve el juego al menú (13) al instante.
+//   · REVANCHA: tras la muerte/victoria, cuando el juego vuelve al
+//     menú se rearma la cortina y se avisa a los animatrónicos
+//     (mensaje toLobby) — sin recargar la página.
+//   · Rebranding: la partida se presenta como THE LOST PIZZERIA.
 //
 // ⚠️ El FNAF 2 original venía con el Runtime.js MINIFICADO
 // (build 292.24): sin nombres internos no se puede pilotar.
@@ -39,7 +54,7 @@
     const ROOM = params.get('mp');
     if (!ROOM) return; // un jugador: no hacer nada
 
-    const BRIDGE_VERSION = 'v2-canon-caja-habilidades';
+    const BRIDGE_VERSION = 'v3-the-lost-pizzeria';
     try { console.log('[MP] guard-bridge ' + BRIDGE_VERSION); } catch (e) { }
 
     const MY_NAME = params.get('name') || 'Guardia';
@@ -132,6 +147,19 @@
     const HOUR_MS = 70000;        // cada hora del MP dura 70s (noche ~7min)
     const NIGHT_FRAME = 3;        // frame del juego = la noche
 
+    // ----- mapa de frames del demo (ingeniería inversa, v3) -----
+    // 0 splash · 2 "what day" (tarjeta previa a la noche: camino de
+    // New Game) · 3 LA NOCHE · 12 "customize" = CUSTOM NIGHT ·
+    // 13 "dream" = menú principal · 14/15 "error" (glitch) ·
+    // 4 static · 5 next day · 6 gameover · 19/23/24 minijuegos
+    const SPLASH_FRAME = 0;
+    const MENU_FRAME = 13;
+    const DAY_CARD_FRAME = 2;
+    const CUSTOMIZE_FRAME = 12;   // la custom night: BLOQUEADA en MP
+    const END_OK_FRAMES = [4, 5, 6, 14, 15, 19, 23, 24]; // flujo de fin de noche
+    let rematchArmed = false;
+    let lastSeenFrame = -1, frameSince = 0, lastBounceToast = 0, forcedQuitAt = 0;
+
     // ---------------------------------------------------------
     // Caja musical (modelo determinista del HOST)
     // El drenaje nativo del demo es ~324/s (noche de 80s); los writers
@@ -178,6 +206,14 @@
                 _R = function () {
                     v.apply(this, arguments);
                     rt = this;
+                    // encadenar con el estabilizador de 2/index.html: su trap
+                    // de Runtime quedó reemplazado por el nuestro, así que su
+                    // envoltura anti-congelamiento la instalamos desde aquí
+                    try {
+                        if (typeof window.__gameStabilize === 'function') {
+                            window.__gameStabilize(rt.application);
+                        }
+                    } catch (e) { }
                     onRuntimeReady();
                     return this;
                 };
@@ -438,6 +474,7 @@
         };
         gline('jugadores: ' + Object.keys(state.players).map(r => ROLE_NAME[r]).join(', '));
         toast(ROLE_NAME[entry.role] + ' (' + entry.name + ') conectado');
+        updateCurtainInfo();
         if (state.phase === 'night') {
             // late join: colocar su marcador y avisarle
             tpMarker(entry.role, START_ROOM[entry.role]);
@@ -479,6 +516,7 @@
                 const p = state.players[entry.role];
                 if (p.room === 'office') tpMarker(entry.role, 'hall2');
                 delete state.players[entry.role];
+                updateCurtainInfo();
                 broadcastPlayers();
             }
         });
@@ -489,6 +527,7 @@
         host.on('special', (m, entry) => { onClientSpecial(entry.role, m); });
         host.start(ROOM, (id) => {
             gline('sala ' + ROOM + ' · esperando animatrónicos…');
+            updateCurtainInfo();
         }, (entry) => {
             // onClient (tercer argumento de Host.start — net.js NO emite
             // '__client' como evento, se pasa como callback)
@@ -772,9 +811,11 @@
         if (state.killDone || state.phase !== 'night') return;
         state.killDone = true;
         state.phase = 'end';
+        state.endAt = Date.now();
+        rematchArmed = false;
         broadcast({ t: 'guardDead', by: role, byName: ROLE_NAME[role] || role, reason: reason });
         toast('💀 ' + (ROLE_NAME[role] || role) + ' te atrapó — ' + reason);
-        gline('💀 ATRAPADO por ' + ROLE_NAME[role] + ' — recarga para revancha');
+        gline('💀 ATRAPADO por ' + ROLE_NAME[role] + ' — espera: la REVANCHA se arma sola');
         // jumpscare nativo: teletransporta al asesino sobre 'got you box'
         try {
             if (role && MARKER[role]) tpMarker(role, 'box');
@@ -787,6 +828,8 @@
     function winNight() {
         if (state.phase !== 'night') return;
         state.phase = 'end';
+        state.endAt = Date.now();
+        rematchArmed = false;
         broadcast({ t: 'nightEnd', night: state.night });
         toast('🌅 6 AM — ¡SOBREVIVISTE la noche ' + state.night + '!');
         gline('🌅 SOBREVIVISTE — noche ' + state.night);
@@ -878,12 +921,199 @@
     }
 
     // ---------------------------------------------------------
-    // Arranque de la noche (salto directo al frame del juego)
+    // CORTINA MP (v3): sustituye el menú nativo del demo, que es
+    // ilegible (los textos no renderizan: runtime 291 + datos 292)
+    // y ofrece la custom night desde el principio. Bloquea el
+    // lienzo (pointer-events) para que el guardia no pueda pulsar
+    // los botones nativos invisibles.
+    // ---------------------------------------------------------
+    function ensureMenuCurtain() {
+        if (document.getElementById('mp-curtain')) return;
+        const c = document.createElement('div');
+        c.id = 'mp-curtain';
+        c.style.cssText = 'position:fixed;inset:0;z-index:9500;pointer-events:auto;' +
+            'background:radial-gradient(ellipse at center, rgba(8,8,12,.88) 0%, rgba(3,3,6,.96) 75%);' +
+            'display:none;align-items:center;justify-content:center;text-align:center;' +
+            'font-family:monospace;color:#cfcfcf';
+        c.innerHTML =
+            '<div style="max-width:680px;padding:24px">' +
+            '<div style="font-size:34px;font-weight:bold;letter-spacing:8px;color:#e8e6df;text-shadow:0 0 22px rgba(255,255,255,.35)">THE LOST PIZZERIA</div>' +
+            '<div style="font-size:11px;letter-spacing:4px;color:#8f8f8f;margin-top:6px">MULTIJUGADOR · 1 GUARDIA CONTRA 10 ANIMATRÓNICOS</div>' +
+            '<div id="mp-curt-info" style="margin:24px 0 6px;font-size:16px;color:#ffd34d;letter-spacing:3px">sala ' + ROOM + '</div>' +
+            '<div id="mp-curt-sub" style="font-size:12px;color:#9a9a9a;margin-bottom:20px">comparte el código con tus amigos</div>' +
+            '<div id="mp-curt-players" style="font-size:12px;color:#9db8d8;margin-bottom:20px;line-height:1.7">nadie más conectado — los animatrónicos pueden unirse</div>' +
+            '<button id="mp-curt-start" style="background:#032;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;font-size:18px;letter-spacing:2px;padding:14px 36px;cursor:pointer;border-radius:6px">▶ EMPEZAR NOCHE</button>' +
+            '<div style="font-size:11px;color:#7d7d7d;margin-top:16px;line-height:1.7">El menú individual y la CUSTOM NIGHT quedan desactivados en multijugador.<br>Máscara [abajo-izq] · linterna · cámaras · caja musical · ⚡DESTELLO [F]</div>' +
+            '</div>';
+        document.body.appendChild(c);
+        document.getElementById('mp-curt-start').addEventListener('click', function () {
+            startNight();
+        });
+    }
+    function showCurtain() {
+        ensureMenuCurtain();
+        const c = document.getElementById('mp-curtain');
+        const btn = document.getElementById('mp-curt-start');
+        const sub = document.getElementById('mp-curt-sub');
+        if ((state.started || 0) > 0) {
+            btn.textContent = '▶ REVANCHA — NOCHE ' + state.night;
+            sub.textContent = state.night > 1
+                ? 'noche ' + (state.night - 1) + ' superada · sigue la ' + state.night
+                : 'noche ' + state.night + ' terminada · ¡otra oportunidad!';
+        } else {
+            btn.textContent = '▶ EMPEZAR NOCHE';
+            sub.textContent = 'comparte el código con tus amigos';
+        }
+        c.style.display = 'flex';
+        updateCurtainInfo();
+    }
+    function hideCurtain() {
+        const c = document.getElementById('mp-curtain');
+        if (c) c.style.display = 'none';
+    }
+    function updateCurtainInfo() {
+        const el = document.getElementById('mp-curt-players');
+        if (!el) return;
+        const roles = Object.keys(state.players);
+        if (!roles.length) {
+            el.innerHTML = 'nadie más conectado — los animatrónicos pueden unirse';
+        } else {
+            el.innerHTML = roles.length + ' animatrónico' + (roles.length > 1 ? 's' : '') +
+                ' conectado' + (roles.length > 1 ? 's' : '') + ':<br>' +
+                roles.map(r => ROLE_NAME[r]).join(' · ');
+        }
+    }
+
+    // ---------------------------------------------------------
+    // WATCHDOG de autoridad de frames (v3)
+    // · boot: salta el splash, deja el menú bajo la cortina y
+    //   convierte cualquier llegada a la noche (New Game nativo)
+    //   en la noche MP. La CUSTOM NIGHT (frame "customize") se
+    //   devuelve al menú al instante. Pantallas raras: al menú.
+    // · night: el frame 3 se fuerza SIEMPRE (sin tope de 20s).
+    // · end: deja ver el game over; al volver al menú arma la
+    //   REVANCHA (cortina + toLobby a los animatrónicos).
+    // ---------------------------------------------------------
+    function forceFrame(n) {
+        const a = app();
+        if (!a || !a.run) return;
+        try {
+            if (a.appRunningState === 3) {          // SL_FRAMELOOP (idle jugando)
+                if (a.run.rhQuit === 0) {
+                    // CAMINO NATIVO del juego — igual que el ACTION_GOTOLEVEL
+                    // de Clickteam: el propio bucle lo procesa en el siguiente
+                    // tick (fade out → endFrame → startTheFrame).
+                    a.run.rhQuit = 3;                // CRun.LOOPEXIT_GOTOLEVEL
+                    a.run.rhQuitParam = (0x8000 | n);
+                    forcedQuitAt = Date.now();
+                    return;
+                }
+                // nuestro salto anterior quedó sin procesar (p. ej. pausa por
+                // foco ya resuelta): rearmarlo una vez pasados 4s
+                if (forcedQuitAt && Date.now() - forcedQuitAt > 4000) {
+                    a.run.rhQuit = 0;
+                    forcedQuitAt = 0;
+                }
+                return;
+            }
+            if (a.appRunningState === 2) {           // SL_FRAMEFADEINLOOP eterno
+                try { a.endFrameFadeIn(); } catch (e) { }
+                return;                              // siguiente tick reintenta
+            }
+            if (a.appRunningState === 1) {           // SL_STARTFRAME en marcha
+                a.nextFrame = n;                     // fijar el destino
+            }
+            // estados 4/5: transición del propio juego — dejarla terminar;
+            // el watchdog reintenta cada 200ms
+        } catch (e) { }
+    }
+    function bounceToMenu(why) {
+        forceFrame(MENU_FRAME);
+        const now = Date.now();
+        if (now - lastBounceToast > 4000) {
+            lastBounceToast = now;
+            toast(why || '⛔ Esa pantalla no está disponible en multijugador');
+        }
+    }
+    function frameWatchdog() {
+        const a = app();
+        if (!a || !a.run) return;
+        // MP: la noche es COMPARTIDA — el juego del guardia NUNCA se pausa
+        // por pérdida de foco (window.blur). El demo original se pausa
+        // (checkFocus → run.pause) y con varias ventanas abiertas el bucle
+        // quedaba congelado con saltos sin procesar: era el atasco del
+        // arranque. Además el guardia es el host: si cambia de pestaña la
+        // noche debe seguir para los animatrónicos.
+        try {
+            if (a.hasFocus === false || a.bStoppedFocus) {
+                a.hasFocus = true;
+                a.bStoppedFocus = false;
+                try { a.run.resume(); } catch (e) { }
+            }
+        } catch (e) { }
+        const cur = a.currentFrame;
+        if (cur !== lastSeenFrame) { lastSeenFrame = cur; frameSince = Date.now(); forcedQuitAt = 0; }
+
+        if (state.phase === 'night') {
+            if (cur === NIGHT_FRAME) return;
+            // la noche MP vive SOLO en el frame 3: forzarla sin descanso
+            forceFrame(NIGHT_FRAME);
+            return;
+        }
+        if (state.phase === 'end') {
+            if (cur === MENU_FRAME) { armRematch(); return; }
+            if (cur === CUSTOMIZE_FRAME) { bounceToMenu('⛔ La CUSTOM NIGHT no está disponible en multijugador'); return; }
+            if (cur === NIGHT_FRAME || cur === DAY_CARD_FRAME) {
+                // dejar correr la animación de kill / 6AM del propio frame
+                // (el jumpscare nativo vive aquí); si el juego se atasca o
+                // quiere reiniciar la noche por su cuenta, a los 8s se le
+                // devuelve al menú para armar la REVANCHA
+                if (Date.now() - (state.endAt || 0) > 8000) forceFrame(MENU_FRAME);
+                return;
+            }
+            // game over / next day / glitches: dejar respirar… pero con tope
+            const stuck = (END_OK_FRAMES.indexOf(cur) === -1) && (Date.now() - frameSince > 10000);
+            const tooLong = Date.now() - (state.endAt || 0) > 25000;
+            if (stuck || tooLong) forceFrame(MENU_FRAME);
+            return;
+        }
+        // ---- boot ----
+        if (cur === SPLASH_FRAME) { forceFrame(MENU_FRAME); return; }   // saltar el splash
+        if (cur === MENU_FRAME) return;                                  // menú bajo la cortina
+        if (cur === DAY_CARD_FRAME || cur === NIGHT_FRAME) {             // New Game nativo
+            startNight();
+            return;
+        }
+        if (cur === CUSTOMIZE_FRAME) {
+            bounceToMenu('⛔ La CUSTOM NIGHT no está disponible en multijugador');
+            return;
+        }
+        // pantallas de paso (error/glitch/load): tolerar 10s y al menú
+        if (Date.now() - frameSince > 10000) bounceToMenu();
+    }
+
+    // revancha: el juego volvió al menú tras morir/ganar
+    function armRematch() {
+        if (rematchArmed) return;
+        rematchArmed = true;
+        state.phase = 'boot';
+        state.killDone = false;
+        broadcast({ t: 'toLobby', night: state.night });
+        showCurtain();
+        gline('revancha lista — noche ' + state.night + ' · sala ' + ROOM);
+        try { console.log('[MP] revancha armada: noche ' + state.night); } catch (e) { }
+    }
+
+    // ---------------------------------------------------------
+    // Arranque de la noche (autoridad de frames del watchdog)
     // ---------------------------------------------------------
     function startNight() {
         const a = app();
         if (!a) return false;
+        if (state.phase === 'night') return true;   // idempotente
+        rematchArmed = false;
         state.phase = 'night';
+        state.started = (state.started || 0) + 1;
         state.killDone = false;
         state.stunCharges = STUN_MAX;
         state.puppetRush = false;
@@ -899,54 +1129,43 @@
         state.specialAt = {};
         state.sprintUntil = {};
         state.batteryBlockUntil = 0;
-        // SALTO DIRECTO: solo prende si el juego está QUIETO en su bucle de
-        // frame (SL_FRAMELOOP=3 + sin GOLEVEL pendiente). En plena transición
-        // (fade in/out del menú/intro) el propio bucle del juego sobrescribe
-        // nextFrame/appRunningState y el salto se pierde — por eso se reintenta
-        // hasta que el juego quede idle.
-        const tryJump = setInterval(() => {
-            if (state.phase !== 'night') { clearInterval(tryJump); return; }
-            const aa = app();
-            if (!aa) return;
-            if (aa.currentFrame === NIGHT_FRAME) { clearInterval(tryJump); return; }
-            if (aa.appRunningState === 3 && aa.run && aa.run.rhQuit === 0) {
-                aa.nextFrame = NIGHT_FRAME;
-                aa.appRunningState = 1; // SL_STARTFRAME
-            }
-        }, 200);
-        setTimeout(() => clearInterval(tryJump), 20000);
+        hideCurtain();
         ensureGuardUI();
         document.getElementById('mp-stun-btn').style.display = 'inline-block';
         document.getElementById('mp-box-wrap').style.display = 'block';
         gline('noche ' + state.night + ' en marcha — sala ' + ROOM);
-        // FIX CRÍTICO: fijar los marcadores ANTES del primer tick del frame.
-        // Un solo tick con 'new bonnie'/'new chica' en la oficina dispara la
-        // animación de ataque nativa → al terminar, GOLEVEL = muerte de la
-        // noche aunque después los teletransportemos (era la muerte aleatoria
-        // a los 10-30s). Envolviendo startTheFrame, el reset ocurre con los
-        // objetos ya creados pero antes de que corra el bucle de eventos.
-        const origStart = a.startTheFrame.bind(a);
-        a.startTheFrame = function () {
-            const going = (this.nextFrame === NIGHT_FRAME);
-            origStart.call(this);
-            if (going && this.currentFrame === NIGHT_FRAME) {
-                try {
-                    AI_COUNTERS.forEach(n => setRS(n, 0));
-                    setRS('music box counter', 2500);
-                    setRS('time left', 99999999);
-                    setRS('time allowed', 99999999);
-                    setRS('battery life', 9999);
-                    setRS('night number', state.night);
-                    setRS('time of the night', 12);
-                    Object.keys(START_ROOM).forEach(role => { tpMarker(role, START_ROOM[role]); });
-                    disableNightInitEvents();
-                    disableMusicBoxWriters();
-                    disableNativeMarkerMovers();
-                } catch (e) { }
-            }
-        };
+        // El salto al frame 3 lo fuerza el WATCHDOG sin tope de tiempo
+        // (v2 lo intentaba 20s y se rendía: el demo seguía su propio guion
+        // → parpadeos y muertes aleatorias). FIX CRÍTICO (v1/v2): además,
+        // fijar los marcadores ANTES del primer tick del frame envolviendo
+        // startTheFrame — un solo tick con 'new bonnie'/'new chica' en la
+        // oficina dispara el ataque nativo y mata la noche.
+        if (!a.__mpStartWrapped) {
+            a.__mpStartWrapped = true;
+            const origStart = a.startTheFrame.bind(a);
+            a.startTheFrame = function () {
+                const going = (this.nextFrame === NIGHT_FRAME);
+                origStart.call(this);
+                if (going && this.currentFrame === NIGHT_FRAME) {
+                    try {
+                        AI_COUNTERS.forEach(n => setRS(n, 0));
+                        setRS('music box counter', 2500);
+                        setRS('time left', 99999999);
+                        setRS('time allowed', 99999999);
+                        setRS('battery life', 9999);
+                        setRS('night number', state.night);
+                        setRS('time of the night', 12);
+                        Object.keys(START_ROOM).forEach(role => { tpMarker(role, START_ROOM[role]); });
+                        disableNightInitEvents();
+                        disableMusicBoxWriters();
+                        disableNativeMarkerMovers();
+                    } catch (e) { }
+                }
+            };
+        }
         // congelar la noche en cuanto llegue el frame
         const iv = setInterval(() => {
+            if (state.phase !== 'night') { clearInterval(iv); return; }
             if (a.currentFrame !== NIGHT_FRAME) return;
             clearInterval(iv);
             stabilizeNight();
@@ -967,20 +1186,6 @@
                 if (Date.now() > (state.stabilizeUntil || 0)) clearInterval(tight);
             }, 50);
         }, 50);
-        // vigilante: si en 12s no llegó, reintentar el salto (mismo mecanismo
-        // de espera-de-juego-quieto)
-        setTimeout(() => {
-            if (a.currentFrame !== NIGHT_FRAME && state.phase === 'night') {
-                const retry = setInterval(() => {
-                    if (state.phase !== 'night' || a.currentFrame === NIGHT_FRAME) { clearInterval(retry); return; }
-                    if (a.appRunningState === 3 && a.run && a.run.rhQuit === 0) {
-                        a.nextFrame = NIGHT_FRAME;
-                        a.appRunningState = 1;
-                    }
-                }, 200);
-                setTimeout(() => clearInterval(retry), 15000);
-            }
-        }, 12000);
         return true;
     }
 
@@ -1129,25 +1334,28 @@
     // Cuando el runtime está listo
     // ---------------------------------------------------------
     function onRuntimeReady() {
-        // el juego arranca en el título; el guardia ve el juego normal
-        // hasta que pulse EMPEZAR (o auto-start con ?autostart=1 para pruebas)
+        // v3: el menú nativo del demo es ilegible y tramposo → cortina MP
+        // + watchdog de autoridad de frames. El guardia juega desde aquí.
         ensureGuardUI();
+        showCurtain();
         gline('sala ' + ROOM + ' · juego listo');
+        // MP: neutralizar la pausa por foco (blur) — la noche compartida
+        // no se detiene aunque el guardia cambie de ventana
+        try {
+            const a = app();
+            Object.defineProperty(a, 'hasFocus', {
+                configurable: true,
+                get: function () { return true; },
+                set: function () { }
+            });
+            if (a.bStoppedFocus) { a.bStoppedFocus = false; try { a.run.resume(); } catch (e) { } }
+        } catch (e) { }
+        if (!window.__mpFrameWatchdog) {
+            window.__mpFrameWatchdog = setInterval(frameWatchdog, 200);
+        }
         startNetwork().then(() => {
             if (params.get('autostart') === '1') {
                 setTimeout(startNight, 3000);
-            } else {
-                // botón EMPEZAR NOCHE en el overlay
-                const ui = document.getElementById('mp-guard-ui');
-                const b = document.createElement('button');
-                b.id = 'mp-start-btn';
-                b.textContent = '▶ EMPEZAR NOCHE (con los conectados; el resto IA)';
-                b.style.cssText = 'pointer-events:auto;display:block;margin-top:6px;background:#032;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;padding:6px 10px;cursor:pointer;border-radius:4px';
-                b.addEventListener('click', () => {
-                    b.remove();
-                    startNight();
-                });
-                ui.appendChild(b);
             }
         });
     }

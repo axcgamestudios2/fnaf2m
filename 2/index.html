@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Five Nights at Freddy's 2</title>
+    <title>The Lost Pizzeria</title>
     <link rel="icon" href="favicon.ico" />
     <style>
         html {
@@ -124,7 +124,7 @@
             font-size: 1.4vw;
         }
     </style>
-    <script src="../mp/guard-bridge.js?v=3" defer></script>
+    <script src="../mp/guard-bridge.js?v=7" defer></script>
 </head>
 
 <body>
@@ -146,6 +146,104 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </body>
 <!--Made by irv77-->
+<!-- ANTI-CONGELAMIENTO: el runtime pausa el juego al perder el foco
+     (checkFocus → run.pause). En segundo plano o con varias ventanas eso
+     congelaba el ARRANQUE (preloader eterno: la subapp del splash se pausa
+     y el primer frame nunca llega) y las noches compartidas del MP. Se
+     neutralizan los blur ANTES de que el runtime registre sus listeners:
+     el juego nunca se pausa sola (como el FNAF original). -->
+<script>
+    (function () {
+        function block(e) { e.stopImmediatePropagation(); }
+        window.addEventListener('blur', block, true);
+        document.addEventListener('blur', block, true);
+    })();
+</script>
+<!-- ESTABILIZADOR DEL JUEGO (siempre activo, un jugador y multijugador):
+     1) ANTI-CONGELAMIENTO: el bucle del juego es una cadena de setTimeout
+        que se auto-reprograma AL FINAL del dibujo. Si el render lanza una
+        excepción (banco de imágenes del runtime 291 con datos 292: un fondo
+        sin decodificar a tiempo → drawImage inválido), la cadena MUERE y el
+        juego queda congelado para siempre (era el arranque atascado). Se
+        envuelve stepApplication: el tick fallido se salta, pero el bucle
+        sigue vivo y el frame se dibuja en cuanto la imagen decodifica.
+     2) ANTI-CUSTOM-NIGHT: el frame "customize" (12) se devuelve al menú (13).
+        En multijugador el guard-bridge añade su propio watchdog completo. -->
+<script>
+    (function () {
+        let rt = null;
+        let appRef = null;
+        let _R;
+        Object.defineProperty(window, 'Runtime', {
+            configurable: true, enumerable: true,
+            get: function () { return _R; },
+            set: function (v) {
+                _R = function () {
+                    v.apply(this, arguments);
+                    rt = this;
+                    stabilize(rt.application);
+                    return this;
+                };
+            }
+        });
+        function stabilize(a) {
+            if (!a || a.__gameStabilized) return;
+            a.__gameStabilized = true;
+            appRef = a;
+            a.__lastStepAt = Date.now();
+            // 1) el bucle NUNCA muere por un error de dibujo
+            try {
+                const orig = a.stepApplication.bind(a);
+                a.stepApplication = function () {
+                    this.__lastStepAt = Date.now();
+                    try {
+                        return orig.call(this);
+                    } catch (e) {
+                        try { console.warn('[stabilizer] tick saltado:', e && e.message); } catch (e2) { }
+                        try { this.setUpdate(); } catch (e3) { }   // re-programar el bucle
+                        return true;
+                    }
+                };
+                a.__stepWrapped = true;
+            } catch (e) { }
+            // 2) guardián anti-custom-night
+            if (!window.__soloGuard) {
+                window.__soloApp = function () { return appRef; };
+                window.__soloGuard = setInterval(function () {
+                    try {
+                        const app = appRef;
+                        if (!app || !app.run) return;
+                        if (app.currentFrame === 12) {          // "customize" = custom night
+                            if (app.appRunningState === 3 && app.run.rhQuit === 0) {
+                                app.run.rhQuit = 3;              // LOOPEXIT_GOTOLEVEL
+                                app.run.rhQuitParam = (0x8000 | 13);   // → menú
+                            } else if (app.appRunningState === 1) {
+                                app.nextFrame = 13;
+                            }
+                        }
+                    } catch (e) { }
+                }, 250);
+            }
+        }
+        // puente para el guard-bridge (MP): su trap de Runtime reemplaza al
+        // de aquí, así que el bridge llama a este hook con la app capturada
+        window.__gameStabilize = stabilize;
+        // 3) vigilante del bucle: sin ticks durante >1.5s → re-programarlo
+        if (!window.__loopVigilante) {
+            window.__loopVigilante = setInterval(function () {
+                try {
+                    const a = appRef;
+                    if (!a || !a.__stepWrapped) return;
+                    if (Date.now() - (a.__lastStepAt || 0) > 1500) {
+                        a.__lastStepAt = Date.now();   // evita ráfagas de kicks
+                        try { console.warn('[stabilizer] bucle muerto: re-kick'); } catch (e) { }
+                        a.setUpdate();
+                    }
+                } catch (e) { }
+            }, 1000);
+        }
+    })();
+</script>
 <script>
     const parts = 20;
     let gametitle, runtimecanvas

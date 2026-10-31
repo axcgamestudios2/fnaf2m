@@ -131,7 +131,7 @@
         $('role-name').textContent = ROLE_INFO.name;
         $('role-name').style.color = ROLE_INFO.color;
         $('role-player').textContent = NAME;
-        document.title = 'FNAF 2 MP — ' + ROLE_INFO.name;
+        document.title = 'The Lost Pizzeria — ' + ROLE_INFO.name;
         // habilidad [Q] única por rol
         const ab = ABILITIES[ROLE];
         if (ab) {
@@ -162,6 +162,15 @@
         s.style.display = 'block';
     }
     function hideScreen() { $('screen').style.display = 'none'; }
+
+    // v3: espera VIVA (banner) en vez de pantalla negra total — el jugador
+    // ve su rol, mapa y compañeros mientras el guardia arranca
+    function showWait(t1, t2) {
+        $('wb1').textContent = t1 || 'ESPERANDO AL GUARDIA…';
+        $('wb2').textContent = t2 || 'la noche arranca cuando pulse EMPEZAR';
+        $('waitbanner').style.display = 'block';
+    }
+    function hideWait() { $('waitbanner').style.display = 'none'; }
 
     // ------------------- Minimapa -------------------
     function buildMap() {
@@ -252,7 +261,8 @@
             S.connected = true;
             S.phase = 'waiting';
             hideScreen();
-            showScreen('ESPERANDO AL GUARDIA…<div class="sub">la noche empieza cuando pulse EMPEZAR</div>');
+            showWait('ESPERANDO AL GUARDIA…',
+                'la noche arranca cuando pulse EMPEZAR — tu rol y tu mapa ya están listos');
         }, (why) => {
             showScreen('NO SE PUDO CONECTAR<div class="sub">' + why + '<br>Comprueba el código o vuelve al lobby.</div>', 'lose');
         });
@@ -263,7 +273,7 @@
             if (typeof m.boxPct === 'number') S.boxLevel = m.boxPct / 100;
             if (m.phase) S.phase = m.phase === 'night' && S.phase !== 'dead' ? 'night' : S.phase;
             paintMates();
-            if (S.phase === 'night') { hideScreen(); renderAll(); }
+            if (S.phase === 'night') { hideScreen(); hideWait(); renderAll(); }
         });
         c.on('box', (m) => {
             if (typeof m.pct === 'number') {
@@ -282,8 +292,23 @@
             S.lastMove = Date.now();
             S.lastSpecial = 0;
             hideScreen();
+            hideWait();
             renderAll();
             toast('🌙 NOCHE ' + S.night + ' — el guardia está en la oficina. ¡A cazar!');
+        });
+        // v3: el guardia armó la revancha — volver a la espera (sin negro)
+        c.on('toLobby', (m) => {
+            S.phase = 'waiting';
+            S.room = START_ROOM[ROLE] || 'cam8';
+            S.inOffice = false;
+            S.lastMove = Date.now();
+            S.boxEmpty = false;
+            $('doorbanner').style.display = 'none';
+            $('stunbar').style.display = 'none';
+            hideScreen();
+            showWait('ESPERANDO AL GUARDIA…',
+                'revancha: la noche ' + (m.night || '') + ' empieza en breve');
+            renderAll();
         });
         c.on('moved', (m) => {
             if (m.role === ROLE) {
@@ -346,6 +371,7 @@
         });
         c.on('guardDead', (m) => {
             S.phase = 'dead';
+            hideWait();
             $('doorbanner').style.display = 'none';
             $('stunbar').style.display = 'none';
             if (m.by === ROLE) {
@@ -356,6 +382,7 @@
         });
         c.on('nightEnd', (m) => {
             S.phase = 'win';
+            hideWait();
             $('doorbanner').style.display = 'none';
             showScreen('🌅 6 AM<div class="big">SOBREVIVIERON A LA NOCHE ' + (m.night || S.night) + '</div><div class="sub">el guardia sigue vivo… de momento</div>', 'win');
         });

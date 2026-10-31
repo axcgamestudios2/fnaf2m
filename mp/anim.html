@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FNAF 2 MP — Animatrónico</title>
+    <title>The Lost Pizzeria — Animatrónico</title>
     <style>
         html { -webkit-user-select: none; user-select: none; overflow: hidden; height: 100%; }
         body {
@@ -117,6 +117,18 @@
         }
         #mates .mk { color: #cfd6e4; font-weight: bold; }
 
+        /* banner de espera (v3): sustituye a la pantalla negra total —
+           el jugador ve su rol, mapa y compañeros mientras espera */
+        #waitbanner {
+            position: fixed; top: 42%; left: 50%; transform: translate(-50%, -50%);
+            z-index: 65; display: none; text-align: center;
+            background: rgba(8,10,16,.92); border: 1px solid #2c3140;
+            border-left: 3px solid #ffd34d; padding: 18px 30px;
+            pointer-events: none; max-width: 80vw;
+        }
+        #waitbanner .wb1 { font-size: 20px; font-weight: bold; letter-spacing: 3px; color: #ffd34d; }
+        #waitbanner .wb2 { font-size: 12px; color: #8f96a3; margin-top: 8px; line-height: 1.6; }
+
         /* toast */
         #toast {
             position: fixed; top: 130px; left: 50%; transform: translateX(-50%);
@@ -161,6 +173,10 @@
     </div>
 
     <div id="roomname">—</div>
+    <div id="waitbanner">
+        <div class="wb1" id="wb1">ESPERANDO AL GUARDIA…</div>
+        <div class="wb2" id="wb2">la noche arranca cuando pulse EMPEZAR — tu rol y tu mapa ya están listos</div>
+    </div>
     <div id="doorbanner"></div>
     <div id="stunbar"></div>
 
@@ -208,7 +224,7 @@
         })();
     </script>
     <script src="net.js"></script>
-    <script src="anim-game.js?v=3"></script>
+    <script src="anim-game.js?v=4"></script>
 </body>
 
 </html>
