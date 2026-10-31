@@ -39,7 +39,7 @@
     const ROOM = params.get('mp');
     if (!ROOM) return; // un jugador: no hacer nada
 
-    const BRIDGE_VERSION = 'v1-fnaf2';
+    const BRIDGE_VERSION = 'v2-canon-caja-habilidades';
     try { console.log('[MP] guard-bridge ' + BRIDGE_VERSION); } catch (e) { }
 
     const MY_NAME = params.get('name') || 'Guardia';
@@ -56,12 +56,17 @@
         hall1: 'hall stage 1', hall2: 'hall stage 2',
         office: 'in office', box: 'got you box'
     };
+    // Nombres CANON de las cámaras (identificación visual de las 12 vistas
+    // del juego: salas de fiesta 1-4, conductos, pasillo, refacciones,
+    // escenario, área de juegos, rincón de premios y caverna del niño)
     const ROOM_NAME = {
-        cam8: 'ALA NORTE (CÁM 8)', cam3: 'PASILLO OESTE (CÁM 3)', cam1: 'REFACCIONES (CÁM 1)',
-        cam5: 'SALA OESTE (CÁM 5)', cam7: 'COMEDOR (CÁM 7)', cam4: 'PASILLO CENTRAL (CÁM 4)',
-        cam2: 'ÁREA DE JUEGOS (CÁM 2)', cam6: 'SALA SUR (CÁM 6)', cam9: 'ESCUCHA SOLA (CÁM 9)',
-        cam11: 'RINCÓN DE PREMIOS (CÁM 11)', cam10: 'SALA ESTE (CÁM 10)', cam12: 'CAVERNA DEL NIÑO (CÁM 12)',
-        hall1: 'PASILLO PRINCIPAL 1', hall2: 'PASILLO PRINCIPAL 2', office: 'OFICINA'
+        cam1: 'SALA DE FIESTAS 1 (CÁM 01)', cam2: 'SALA DE FIESTAS 2 (CÁM 02)',
+        cam3: 'SALA DE FIESTAS 3 (CÁM 03)', cam4: 'SALA DE FIESTAS 4 (CÁM 04)',
+        cam5: 'CONDUCTO DE AIRE IZQ. (CÁM 05)', cam6: 'CONDUCTO DE AIRE DER. (CÁM 06)',
+        cam7: 'PASILLO PRINCIPAL (CÁM 07)', cam8: 'REFACCIONES (CÁM 08)',
+        cam9: 'ESCENARIO (CÁM 09)', cam10: 'ÁREA DE JUEGOS (CÁM 10)',
+        cam11: 'RINCÓN DE PREMIOS (CÁM 11)', cam12: 'CAVERNA DEL NIÑO (CÁM 12)',
+        hall1: 'PASILLO PRINCIPAL (TRAMO 1)', hall2: 'FRENTE A LA OFICINA', office: 'OFICINA'
     };
     // grafo de movimiento (geografía del mapa del demo)
     const ADJACENCY = {
@@ -87,11 +92,13 @@
         mangle: 'new foxy', bb: 'balloon boy', puppet: 'sockpuppet',
         w_freddy: 'old freddy', w_bonnie: 'old bonnie', w_chica: 'old chica', w_foxy: 'old foxy'
     };
-    // sala inicial por rol
+    // sala inicial por rol (posiciones canon del FNAF 2):
+    //   toys en el ESCENARIO · withered en REFACCIONES · BB en ÁREA DE
+    //   JUEGOS · mangle en su CAVERNA · la marioneta en el RINCÓN DE PREMIOS
     const START_ROOM = {
-        toy_freddy: 'cam7', toy_bonnie: 'cam9', toy_chica: 'cam8',
-        mangle: 'cam12', bb: 'cam5', puppet: 'cam11',
-        w_freddy: 'cam1', w_bonnie: 'cam1', w_chica: 'cam1', w_foxy: 'cam3'
+        toy_freddy: 'cam9', toy_bonnie: 'cam9', toy_chica: 'cam9',
+        mangle: 'cam12', bb: 'cam10', puppet: 'cam11',
+        w_freddy: 'cam8', w_bonnie: 'cam8', w_chica: 'cam8', w_foxy: 'cam8'
     };
     const ROLE_NAME = {
         guard: 'GUARDIA', toy_freddy: 'TOY FREDDY', toy_bonnie: 'TOY BONNIE',
@@ -111,8 +118,10 @@
     // ---------------------------------------------------------
     // Balanceo
     // ---------------------------------------------------------
-    const MOVE_CD = 6000;         // ms entre salas
     const MANGLE_CD = 5000;       // mangle trepa más rápido
+    function nightMoveCd(night) { // progresión: 6s en N1 → 3s en N5+
+        return Math.max(3000, 6000 - 750 * (Math.max(1, night) - 1));
+    }
     const OFFICE_MS = 8000;       // anti-camping en la oficina
     const MASK_WINDOW_MS = 3000;  // tiempo del guardia para máscarse
     const KILL_FALLBACK_MS = 30000;
@@ -122,6 +131,38 @@
     const BOX_KILL_MS = 4000;     // marioneta: caja agotada → ventana de kill
     const HOUR_MS = 70000;        // cada hora del MP dura 70s (noche ~7min)
     const NIGHT_FRAME = 3;        // frame del juego = la noche
+
+    // ---------------------------------------------------------
+    // Caja musical (modelo determinista del HOST)
+    // El drenaje nativo del demo es ~324/s (noche de 80s); los writers
+    // nativos del contador se desactivan y el nivel lo lleva el host:
+    //   · drena 27/s → ~90s por caja llena (hay que dar cuerda ~4-5 veces
+    //     por noche de 7 minutos)
+    //   · dar cuerda (mantener el botón del overlay) recarga a 180/s
+    //   · el nivel se escribe en 'music box counter' para que la BARRA
+    //     nativa de la CÁM 11 y la alerta del juego sigan funcionando
+    // ---------------------------------------------------------
+    const BOX_MAX = 2500;
+    const BOX_DRAIN = 27;
+    const BOX_WIND = 180;
+    const BOX_DRAIN_RUSH = 60;    // habilidad de la marioneta: drenaje 2x+
+
+    // ---------------------------------------------------------
+    // Habilidades únicas [Q] por rol (cooldown común 30s)
+    // ---------------------------------------------------------
+    const SPECIAL_CD = 30000;
+    const ABILITIES = {
+        toy_freddy: { key: 'faro', name: 'FAROL', desc: 'Anuncias tu llegada a la oficina… aunque no estés ahí (broma: banner falso 2.5s)' },
+        toy_bonnie: { key: 'haze', name: 'INTERFERENCIA', desc: 'Estática en el monitor del guardia 3s' },
+        toy_chica: { key: 'noise', name: 'CUPCAKE', desc: 'Golpes metálicos: el guardia no distingue de dónde vienes (4s)' },
+        mangle: { key: 'radio', name: 'RADIO ROTA', desc: 'Estática a todo volumen: drena 10% de su batería (4s)' },
+        bb: { key: 'blockbox', name: 'GLOBOS', desc: 'Lluvia de globos: el guardia NO puede dar cuerda a la caja 6s' },
+        puppet: { key: 'rush', name: 'MELODÍA MISTERIOSA', desc: 'La caja musical se agota el doble de rápido durante 8s' },
+        w_freddy: { key: 'faro', name: 'BURLA', desc: 'Tu sombra asoma en la oficina sin estar ahí (banner falso 2.5s)' },
+        w_bonnie: { key: 'haze', name: 'TORMENTO', desc: 'Tu cara sin frente llena de estática el monitor 3s' },
+        w_chica: { key: 'noise', name: 'CAZUELAS', desc: 'Ruido de cocina atronador: el guardia pierde la pista (4s)' },
+        w_foxy: { key: 'sprint', name: 'SPRINT', desc: 'Corres el doble de rápido durante 6s' }
+    };
 
     // ---------------------------------------------------------
     // Captura de la instancia del Runtime (sin tocar el juego)
@@ -273,10 +314,21 @@
         stunUntil: 0,
         stunCharges: STUN_MAX,
         stunLastUse: 0,
-        boxEmptyAt: 0,            // momento en que la caja se agotó
+        boxEmptyAt: 0,
         puppetRush: false,
         endsAt: 0,
-        killDone: false
+        killDone: false,
+        // caja musical (modelo del host)
+        boxLevel: BOX_MAX,
+        boxWinding: false,        // el guardia mantiene el botón de cuerda
+        boxBlockedUntil: 0,       // habilidad de BB: cuerda bloqueada
+        boxRushUntil: 0,          // habilidad de la marioneta: drenaje 2x
+        boxLastTick: 0,
+        // habilidades [Q]
+        specialAt: {},            // role → último uso
+        sprintUntil: {},          // role → sprint activo hasta
+        // linterna robada por BB
+        batteryBlockUntil: 0
     };
     window.__MP = {
         find, rs, app: () => app(), state,
@@ -296,13 +348,28 @@
         d.innerHTML =
             '<div id="mp-g-title" style="color:#7ec8ff;font-weight:bold;letter-spacing:1px">MP · GUARDIA</div>' +
             '<div id="mp-g-line">conectando…</div>' +
+            '<div id="mp-box-wrap" style="display:none;margin-top:6px">' +
+            '<div style="display:flex;justify-content:space-between;font-size:11px;color:#9db8d8"><span>🎵 CAJA MUSICAL</span><span id="mp-box-pct">100%</span></div>' +
+            '<div style="width:100%;height:8px;background:#0a1522;border:1px solid #2c4a6a;border-radius:4px;overflow:hidden;margin-top:2px">' +
+            '<div id="mp-box-bar" style="width:100%;height:100%;background:linear-gradient(90deg,#3d80ff,#7ec8ff)"></div></div>' +
+            '<button id="mp-wind-btn" style="pointer-events:auto;width:100%;margin-top:4px;background:#123;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;padding:5px 8px;cursor:pointer;border-radius:4px;font-size:12px">🎵 DAR CUERDA (mantener)</button>' +
+            '</div>' +
             '<button id="mp-stun-btn" style="pointer-events:auto;display:none;margin-top:6px;background:#123;border:1px solid #7ec8ff;color:#cfe8ff;font-family:monospace;font-weight:bold;padding:6px 12px;cursor:pointer;border-radius:4px">⚡ DESTELLO [F] (<span id="mp-stun-n">2</span>)</button>';
         document.body.appendChild(d);
         const b = document.getElementById('mp-stun-btn');
         b.addEventListener('click', useStun);
+        // dar cuerda: mantener pulsado
+        const w = document.getElementById('mp-wind-btn');
+        const windOn = (e) => { e.preventDefault(); if (Date.now() < state.boxBlockedUntil) { toast('🎈 ¡GLOBOS! — no puedes dar cuerda (' + Math.ceil((state.boxBlockedUntil - Date.now()) / 1000) + 's)'); return; } state.boxWinding = true; w.style.background = '#1a4a2a'; };
+        const windOff = () => { state.boxWinding = false; w.style.background = '#123'; };
+        w.addEventListener('mousedown', windOn);
+        w.addEventListener('touchstart', windOn, { passive: false });
+        ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => w.addEventListener(ev, windOff));
         window.addEventListener('keydown', (e) => {
             if ((e.key === 'f' || e.key === 'F') && state.phase === 'night') useStun();
+            if (e.code === 'Space' && state.phase === 'night' && e.target === document.body) { windOn(e); }
         });
+        ['keyup'].forEach(ev => window.addEventListener(ev, (e) => { if (e.code === 'Space') windOff(); }));
     }
     function gline(txt) { const el = document.getElementById('mp-g-line'); if (el) el.innerHTML = txt; }
     function toast(txt, ms) {
@@ -337,7 +404,7 @@
         Object.keys(state.players).forEach(role => {
             const p = state.players[role];
             if (p && p.room === 'office' && !p.killing) {
-                retreat(role, 'cam1', 'destello del guardia');
+                retreat(role, 'hall2', 'destello del guardia');
             }
         });
         gline('⚡ DESTELLO — cargas: ' + state.stunCharges);
@@ -366,7 +433,7 @@
     function onClientJoin(entry) {
         if (!entry || !entry.role) return;
         state.players[entry.role] = {
-            name: entry.name || 'Jugador', room: START_ROOM[entry.role] || 'cam1',
+            name: entry.name || 'Jugador', room: START_ROOM[entry.role] || 'cam8',
             lastMove: 0, inOffice: false, ready: false, killing: false
         };
         gline('jugadores: ' + Object.keys(state.players).map(r => ROLE_NAME[r]).join(', '));
@@ -398,7 +465,7 @@
             gline('⚠ sin módulo de red — modo local');
             return;
         }
-        await loadScript(MP_URL + 'net.js?v=1');
+        await loadScript(MP_URL + 'net.js?v=2');
         if (typeof MP === 'undefined') {
             gline('⚠ sin capa de red — modo local');
             return;
@@ -419,6 +486,7 @@
         host.on('move', (m, entry) => { onClientMove(entry.role, m); });
         host.on('jumpscare', (m, entry) => { onClientJumpscare(entry.role, m); });
         host.on('puppetEscape', (m, entry) => { onPuppetEscape(entry.role, m); });
+        host.on('special', (m, entry) => { onClientSpecial(entry.role, m); });
         host.start(ROOM, (id) => {
             gline('sala ' + ROOM + ' · esperando animatrónicos…');
         }, (entry) => {
@@ -432,7 +500,11 @@
         const list = Object.keys(state.players).map(r => ({
             role: r, name: state.players[r].name, room: state.players[r].room
         }));
-        broadcast({ t: 'players', players: list, night: state.night, phase: state.phase });
+        broadcast({
+            t: 'players', players: list, night: state.night, phase: state.phase,
+            boxPct: Math.max(0, Math.round(state.boxLevel / BOX_MAX * 100)),
+            moveCd: nightMoveCd(state.night)
+        });
     }
 
     // ---------------------------------------------------------
@@ -444,7 +516,8 @@
         if (!p) return;
         const now = Date.now();
         if (now < state.stunUntil) { sendMoveDeny(role, m, 'aturdido por el destello'); return; }
-        const cd = role === 'mangle' ? MANGLE_CD : MOVE_CD;
+        let cd = role === 'mangle' ? MANGLE_CD : nightMoveCd(state.night);
+        if (state.sprintUntil[role] && now < state.sprintUntil[role]) cd = Math.max(1500, Math.round(cd / 2));
         if (now - p.lastMove < cd) {
             sendMoveDeny(role, m, 'cooldown ' + Math.ceil((cd - (now - p.lastMove)) / 1000) + 's');
             return;
@@ -486,10 +559,12 @@
     function onOfficeEntry(role) {
         const now = Date.now();
         if (role === 'bb') {
-            // BB: sin kill — sabotea la linterna
+            // BB: sin kill — sabotea la linterna DE VERDAD (40s sin batería:
+            // el estabilizador no repone 'battery life' mientras dure el robo)
+            state.batteryBlockUntil = now + 40000;
             setRS('battery life', 0);
             broadcast({ t: 'bbSabotage', role: 'bb' });
-            toast('🎈 BALLOON BOY entró: ¡te quitó la linterna!');
+            toast('🎈 BALLOON BOY entró: ¡te quitó la LINTERNA 40s!');
             setTimeout(() => { if (state.players.bb) retreat('bb', 'hall2', 'sabotaje completado'); }, 2500);
             return;
         }
@@ -575,12 +650,99 @@
     }
 
     // ---------------------------------------------------------
+    // Habilidades únicas [Q] — efecto en el guardia + confirmación
+    // ---------------------------------------------------------
+    function onClientSpecial(role, m) {
+        if (state.phase !== 'night') return;
+        const p = state.players[role];
+        const ab = ABILITIES[role];
+        if (!p || !ab) return;
+        const now = Date.now();
+        if (now < state.stunUntil) { sendMoveDeny(role, m, 'aturdido por el destello'); return; }
+        const last = state.specialAt[role] || 0;
+        if (now - last < SPECIAL_CD) {
+            if (state.host) state.host.conns.forEach(c => { if (c.role === role) state.host.send(c, { t: 'specialDeny', why: 'recarga ' + Math.ceil((SPECIAL_CD - (now - last)) / 1000) + 's' }); });
+            return;
+        }
+        state.specialAt[role] = now;
+        const name = ROLE_NAME[role] || role;
+        switch (ab.key) {
+            case 'sprint':
+                state.sprintUntil[role] = now + 6000;
+                toast('🏃 ' + name + ' ha echado a CORRER (6s)');
+                break;
+            case 'haze':
+                overlayEffect('haze', 3000);
+                toast('📺 ' + name + ' ha saboteado el MONITOR (3s)');
+                break;
+            case 'noise':
+                overlayEffect('noise', 4000);
+                toast('🍲 ¡RUIDO METÁLICO EN LAS TUBERÍAS! (' + name + ')');
+                break;
+            case 'radio':
+                overlayEffect('radio', 4000);
+                { const b = rs('battery life'); if (b !== null) setRS('battery life', Math.max(0, b - 250)); }
+                toast('📻 ' + name + ' CHILLA por la radio — batería -10%');
+                break;
+            case 'faro':
+                fakeOfficeAlert(role, 2500);
+                break;
+            case 'blockbox':
+                state.boxBlockedUntil = now + 6000;
+                state.boxWinding = false;
+                toast('🎈 ¡GLOBOS por todas partes! — NO puedes dar cuerda (6s)');
+                break;
+            case 'rush':
+                state.boxRushUntil = now + 8000;
+                toast('🎶 La caja se agota EL DOBLE DE RÁPIDO (8s)');
+                break;
+        }
+        if (state.host) state.host.conns.forEach(c => { if (c.role === role) state.host.send(c, { t: 'specialOk', name: ab.name }); });
+        broadcast({ t: 'specialFx', role: role, name: ab.name });
+    }
+
+    // efectos visibles sobre el guardia (overlays HTML, sin tocar el juego)
+    function overlayEffect(kind, ms) {
+        let d = document.getElementById('mp-fx');
+        if (!d) {
+            d = document.createElement('div');
+            d.id = 'mp-fx';
+            d.style.cssText = 'position:fixed;inset:0;z-index:9998;pointer-events:none;display:none';
+            document.body.appendChild(d);
+        }
+        if (kind === 'haze') {
+            d.style.background = 'repeating-linear-gradient(0deg,rgba(255,255,255,.14) 0 2px,rgba(0,0,0,.28) 2px 4px)';
+        } else if (kind === 'noise') {
+            d.style.background = 'repeating-linear-gradient(45deg,rgba(255,0,0,.06) 0 12px,rgba(255,255,255,.05) 12px 24px,rgba(0,0,0,.1) 24px 36px)';
+        } else if (kind === 'radio') {
+            d.style.background = 'repeating-linear-gradient(90deg,rgba(255,60,60,.12) 0 3px,rgba(60,60,255,.1) 3px 6px,rgba(0,0,0,.2) 6px 9px)';
+        }
+        d.style.display = 'block';
+        clearTimeout(d.__t);
+        d.__t = setTimeout(() => { d.style.display = 'none'; }, ms);
+    }
+
+    // banner FALSO de entrada a la oficina (farol de los freddy)
+    function fakeOfficeAlert(role, ms) {
+        let d = document.getElementById('mp-fake');
+        if (!d) {
+            d = document.createElement('div');
+            d.id = 'mp-fake';
+            d.style.cssText = 'position:fixed;top:16%;left:50%;transform:translateX(-50%);z-index:99999;font-family:monospace;font-weight:bold;color:#ff5b5b;background:rgba(20,0,0,.85);border:2px solid #a33;padding:14px 26px;border-radius:8px;font-size:20px;letter-spacing:2px;pointer-events:none;text-align:center';
+            document.body.appendChild(d);
+        }
+        d.innerHTML = '⚠ ' + (ROLE_NAME[role] || '') + ' EN LA OFICINA<br><span style="font-size:12px;color:#ffb0b0">¡PONTE LA MÁSCARA!</span>';
+        d.style.display = 'block';
+        clearTimeout(d.__t);
+        d.__t = setTimeout(() => { d.style.display = 'none'; }, ms);
+    }
+
+    // ---------------------------------------------------------
     // La Marioneta: escape por caja agotada
     // ---------------------------------------------------------
     function onPuppetEscape(role, m) {
         if (role !== 'puppet' || state.phase !== 'night') return;
-        const box = rs('music box counter');
-        if (box === null || box > 120) {
+        if (state.boxLevel > 120 && !state.boxEmptyAt) {
             if (state.host) state.host.conns.forEach(c => { if (c.role === role) state.host.send(c, { t: 'moveDeny', why: 'la caja aún no está agotada' }); });
             return;
         }
@@ -633,6 +795,89 @@
     }
 
     // ---------------------------------------------------------
+    // Desactiva los MOVERS nativos de marcadores: el guion del demo
+    // reposiciona los marcadores por eventos (a los ~12s mete a
+    // old foxy en 'got you box' y a new bonnie/chica EN LA OFICINA →
+    // kill nativo → GOLEVEL al menú = la muerte aleatoria). Se
+    // desactivan los grupos que POSICIONAN marcadores (acción 65538
+    // con OI de marcador) y NO pertenecen a la cadena de kill/render
+    // (condiciones sobre being-attacked/got-you/in-office/occupied).
+    // Los marcadores pasan a ser 100% del host (tpMarker).
+    // ---------------------------------------------------------
+    function disableNativeMarkerMovers() {
+        const a = app();
+        if (!a || !a.run || !a.run.rhEvtProg) return;
+        const markerNames = {};
+        Object.keys(MARKER).forEach(r => { markerNames[MARKER[r]] = true; });
+        const KILL_OIS = ['being attacked by', 'got you box', 'in office', 'office occupied', 'in danger', 'who got you', 'got you stage'];
+        const markerOis = {}, killOis = {};
+        try {
+            const list = a.run.rhOiList;
+            for (let i = 0; i < a.run.rhMaxOI; i++) {
+                const oi = list[i];
+                if (!oi || !oi.oilName) continue;
+                if (markerNames[oi.oilName]) markerOis[i] = true;
+                if (KILL_OIS.indexOf(oi.oilName) !== -1) killOis[i] = true;
+            }
+        } catch (e) { }
+        const groups = a.run.rhEvtProg.events || [];
+        let disabled = 0;
+        groups.forEach(grp => {
+            if (!grp || !grp.evgEvents || (grp.evgFlags & 0x4000)) return;
+            let positionsMarker = false, killRelated = false;
+            grp.evgEvents.forEach((ev, i) => {
+                if (!ev) return;
+                if (i < grp.evgNCond) {
+                    // condición sobre la cadena de kill → NO tocar (anim de
+                    // muerte, render de oficina, etc.)
+                    if (killOis[ev.evtOiList]) killRelated = true;
+                } else if (ev.evtCode === 65538 && ev.evtOiList !== undefined && markerOis[ev.evtOiList]) {
+                    positionsMarker = true;
+                }
+            });
+            if (positionsMarker && !killRelated) {
+                grp.evgFlags |= 0x4000;   // EVGFLAGS_INACTIVE
+                disabled++;
+            }
+        });
+        try { console.log('[MP] movers nativos de marcadores desactivados: ' + disabled); } catch (e) { }
+    }
+
+    // ---------------------------------------------------------
+    // Desactiva los WRITERS nativos de la caja musical: el demo drena
+    // el contador a ~324/s (noche de 80s) mediante eventos que lo
+    // reescriben cada tick. El nivel pasa a ser 100% del HOST (drena
+    // 27/s, cuerda con el botón del overlay) y las CONDICIONES nativas
+    // siguen leyéndolo: la barra de la CÁM 11 y el kill canon de la
+    // marioneta con la caja agotada siguen funcionando igual.
+    // ---------------------------------------------------------
+    function disableMusicBoxWriters() {
+        const a = app();
+        if (!a || !a.run || !a.run.rhEvtProg) return;
+        let boxOi = -1;
+        try {
+            const list = a.run.rhOiList;
+            for (let i = 0; i < a.run.rhMaxOI; i++) {
+                const oi = list[i];
+                if (oi && oi.oilName === 'music box counter') { boxOi = i; break; }
+            }
+        } catch (e) { }
+        if (boxOi < 0) return;
+        const groups = a.run.rhEvtProg.events || [];
+        let disabled = 0;
+        groups.forEach(grp => {
+            if (!grp || !grp.evgEvents || (grp.evgFlags & 0x4000)) return;
+            let touches = false;
+            grp.evgEvents.forEach((ev, i) => {
+                if (i < grp.evgNCond) return;   // solo acciones
+                if (ev && ev.evtOiList === boxOi) touches = true;
+            });
+            if (touches) { grp.evgFlags |= 0x4000; disabled++; }
+        });
+        try { console.log('[MP] writers nativos de la caja desactivados: ' + disabled); } catch (e) { }
+    }
+
+    // ---------------------------------------------------------
     // Arranque de la noche (salto directo al frame del juego)
     // ---------------------------------------------------------
     function startNight() {
@@ -645,10 +890,34 @@
         state.boxEmptyAt = 0;
         state.mpHour = 12;
         state.hourAt = Date.now();
-        a.nextFrame = NIGHT_FRAME;
-        a.appRunningState = 1; // SL_STARTFRAME
+        // caja musical + habilidades: estado fresco
+        state.boxLevel = BOX_MAX;
+        state.boxWinding = false;
+        state.boxBlockedUntil = 0;
+        state.boxRushUntil = 0;
+        state.boxLastTick = Date.now();
+        state.specialAt = {};
+        state.sprintUntil = {};
+        state.batteryBlockUntil = 0;
+        // SALTO DIRECTO: solo prende si el juego está QUIETO en su bucle de
+        // frame (SL_FRAMELOOP=3 + sin GOLEVEL pendiente). En plena transición
+        // (fade in/out del menú/intro) el propio bucle del juego sobrescribe
+        // nextFrame/appRunningState y el salto se pierde — por eso se reintenta
+        // hasta que el juego quede idle.
+        const tryJump = setInterval(() => {
+            if (state.phase !== 'night') { clearInterval(tryJump); return; }
+            const aa = app();
+            if (!aa) return;
+            if (aa.currentFrame === NIGHT_FRAME) { clearInterval(tryJump); return; }
+            if (aa.appRunningState === 3 && aa.run && aa.run.rhQuit === 0) {
+                aa.nextFrame = NIGHT_FRAME;
+                aa.appRunningState = 1; // SL_STARTFRAME
+            }
+        }, 200);
+        setTimeout(() => clearInterval(tryJump), 20000);
         ensureGuardUI();
         document.getElementById('mp-stun-btn').style.display = 'inline-block';
+        document.getElementById('mp-box-wrap').style.display = 'block';
         gline('noche ' + state.night + ' en marcha — sala ' + ROOM);
         // FIX CRÍTICO: fijar los marcadores ANTES del primer tick del frame.
         // Un solo tick con 'new bonnie'/'new chica' en la oficina dispara la
@@ -671,6 +940,8 @@
                     setRS('time of the night', 12);
                     Object.keys(START_ROOM).forEach(role => { tpMarker(role, START_ROOM[role]); });
                     disableNightInitEvents();
+                    disableMusicBoxWriters();
+                    disableNativeMarkerMovers();
                 } catch (e) { }
             }
         };
@@ -696,11 +967,18 @@
                 if (Date.now() > (state.stabilizeUntil || 0)) clearInterval(tight);
             }, 50);
         }, 50);
-        // vigilante: si en 12s no llegó, reintentar
+        // vigilante: si en 12s no llegó, reintentar el salto (mismo mecanismo
+        // de espera-de-juego-quieto)
         setTimeout(() => {
             if (a.currentFrame !== NIGHT_FRAME && state.phase === 'night') {
-                a.nextFrame = NIGHT_FRAME;
-                a.appRunningState = 1;
+                const retry = setInterval(() => {
+                    if (state.phase !== 'night' || a.currentFrame === NIGHT_FRAME) { clearInterval(retry); return; }
+                    if (a.appRunningState === 3 && a.run && a.run.rhQuit === 0) {
+                        a.nextFrame = NIGHT_FRAME;
+                        a.appRunningState = 1;
+                    }
+                }, 200);
+                setTimeout(() => clearInterval(retry), 15000);
             }
         }, 12000);
         return true;
@@ -711,12 +989,14 @@
         const a = app();
         if (!a || a.currentFrame !== NIGHT_FRAME) return;
         AI_COUNTERS.forEach(n => setRS(n, 0));
-        setRS('music box counter', 2500);
+        setRS('music box counter', Math.round(state.boxLevel));
         setRS('time left', 99999999);
         setRS('time allowed', 99999999);
         setRS('night number', state.night);
         setRS('time of the night', 12);
         setRS('battery life', 9999);
+        disableMusicBoxWriters();
+        disableNativeMarkerMovers();
         // marcadores a sus salas de inicio
         Object.keys(START_ROOM).forEach(role => {
             tpMarker(role, START_ROOM[role]);
@@ -731,25 +1011,85 @@
                 if (state.phase !== 'night') return;
                 const aa = app();
                 if (!aa || aa.currentFrame !== NIGHT_FRAME) return;
+                const now = Date.now();
                 AI_COUNTERS.forEach(n => { if (rs(n) !== 0) setRS(n, 0); });
                 if (rs('time left') !== null && rs('time left') < 90000000) setRS('time left', 99999999);
                 if (rs('time allowed') !== null && rs('time allowed') < 90000000) setRS('time allowed', 99999999);
-                if (rs('battery life') !== null && rs('battery life') < 5000) setRS('battery life', 9999);
-                // durante el arranque: re-colocar marcadores (los objetos se
-                // crean progresivamente y el primer tp puede llegar demasiado pronto)
-                if (Date.now() < (state.stabilizeUntil || 0)) {
-                    Object.keys(START_ROOM).forEach(role => { tpMarker(role, START_ROOM[role]); });
-                    setRS('music box counter', 2500);
+                // batería: NO reponer mientras BB tenga la linterna robada
+                if (now >= state.batteryBlockUntil && rs('battery life') !== null && rs('battery life') < 5000) {
                     setRS('battery life', 9999);
                 }
-                // la caja sigue drenando: el guardia la da cuerda con el juego real
-                const box = rs('music box counter');
-                if (box !== null && box <= 0 && !state.boxEmptyAt) {
-                    state.boxEmptyAt = Date.now();
+                // durante el arranque: re-colocar marcadores (los objetos se
+                // crean progresivamente y el primer tp puede llegar demasiado pronto)
+                if (now < (state.stabilizeUntil || 0)) {
+                    Object.keys(START_ROOM).forEach(role => { tpMarker(role, START_ROOM[role]); });
+                    setRS('battery life', 9999);
+                }
+                // ---- AUTORIDAD DE MARCADORES (permanente) ----
+                // el guion nativo del demo mueve los marcadores por eventos
+                // que no hemos podido desactivar (movers con condiciones
+                // variadas); los roles con jugador siguen su sala lógica y
+                // los de IA quedan clavados en su sala de inicio. Durante un
+                // kill (killDone) no se toca: el jumpscare nativo manda.
+                if (!state.killDone) {
+                    Object.keys(MARKER).forEach(role => {
+                        const room = (state.players[role]) ? state.players[role].room : START_ROOM[role];
+                        if (!room || !ANCHOR[room]) return;
+                        const m = find(MARKER[role]);
+                        const an = find(ANCHOR[room]);
+                        if (m && an && (Math.abs(m.hoX - an.hoX) > 20 || Math.abs(m.hoY - an.hoY) > 20)) {
+                            tpMarker(role, room);
+                        }
+                    });
+                }
+                // ---- 🎵 CAJA MUSICAL: modelo determinista del HOST ----
+                // (los writers nativos están desactivados; el nivel se
+                // escribe en el contador para que el HUD nativo lo muestre
+                // y las condiciones canon de la marioneta lo sigan leyendo)
+                const dt = Math.min(2, (now - (state.boxLastTick || now)) / 1000);
+                state.boxLastTick = now;
+                const blocked = now < state.boxBlockedUntil;
+                if (state.boxWinding && !blocked) {
+                    state.boxLevel = Math.min(BOX_MAX, state.boxLevel + BOX_WIND * dt);
+                } else {
+                    const drain = (now < state.boxRushUntil) ? BOX_DRAIN_RUSH : BOX_DRAIN;
+                    state.boxLevel = Math.max(0, state.boxLevel - drain * dt);
+                }
+                setRS('music box counter', Math.round(state.boxLevel));
+                const pct = Math.round(state.boxLevel / BOX_MAX * 100);
+                const bar = document.getElementById('mp-box-bar');
+                if (bar) {
+                    bar.style.width = pct + '%';
+                    bar.style.background = pct < 25 ? '#ff5b5b' : (pct < 50 ? '#ffb84d' : 'linear-gradient(90deg,#3d80ff,#7ec8ff)');
+                }
+                const pctEl = document.getElementById('mp-box-pct');
+                if (pctEl) pctEl.textContent = pct + '%';
+                const wb = document.getElementById('mp-wind-btn');
+                if (wb) {
+                    wb.disabled = blocked;
+                    wb.style.opacity = blocked ? '.45' : '1';
+                    wb.textContent = blocked ? '🎈 GLOBOS (' + Math.ceil((state.boxBlockedUntil - now) / 1000) + 's)' : '🎵 DAR CUERDA (mantener)';
+                }
+                if (state.boxLevel <= 0 && !state.boxEmptyAt) {
+                    state.boxEmptyAt = now;
                     broadcast({ t: 'boxEmpty' });
                     toast('🎁 ¡CAJA MUSICAL AGOTADA! La Marioneta puede escapar');
-                } else if (box !== null && box > 200) {
+                } else if (state.boxLevel > 200 && state.boxEmptyAt) {
                     state.boxEmptyAt = 0;
+                    broadcast({ t: 'boxRefilled' });
+                }
+                // canon: la caja vacía 4s seguidos sin cuerda → la marioneta
+                // (IA o jugadora) mata al guardia
+                if (state.boxEmptyAt && now - state.boxEmptyAt > BOX_KILL_MS && !state.killDone) {
+                    if (state.players.puppet && state.players.puppet.room !== 'office') {
+                        // hay marioneta JUGADORA: ella ejecuta el kill al entrar
+                    } else {
+                        killGuard('puppet', 'la caja musical se agotó… LA MARIONETA salió');
+                    }
+                }
+                if (now - (state.__boxBcast || 0) > 2000) {
+                    state.__boxBcast = now;
+                    broadcast({ t: 'box', pct: pct });
                 }
                 // reloj MP: las horas duran HOUR_MS y las marca el HOST
                 // (el demo las hace volar en ~15s; la noche MP dura minutos).
@@ -763,14 +1103,20 @@
                         setRS('time of the night', state.mpHour);   // congelar
                     }
                 }
-                if (state.phase === 'night' && Date.now() - (state.hourAt || Date.now()) > HOUR_MS) {
-                    state.hourAt = Date.now();
+                if (state.phase === 'night' && now - (state.hourAt || now) > HOUR_MS) {
+                    state.hourAt = now;
                     state.mpHour = (state.mpHour === 12) ? 1 : state.mpHour + 1;
                     if (state.mpHour >= 6) {
                         winNight();
                     } else {
                         setRS('time of the night', state.mpHour);
                         broadcast({ t: 'hour', hour: state.mpHour });
+                        // recarga del destello por hora
+                        if (state.stunCharges < STUN_MAX) {
+                            state.stunCharges++;
+                            const n = document.getElementById('mp-stun-n');
+                            if (n) n.textContent = state.stunCharges;
+                        }
                     }
                 }
             }, 500);

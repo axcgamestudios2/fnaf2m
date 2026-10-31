@@ -33,17 +33,17 @@
     const HOST_INFO = { name: 'ANFITRIÓN', color: '#9a9a9a' };
     const ANIM_IDS = ['toy_freddy', 'toy_bonnie', 'toy_chica', 'mangle', 'bb', 'puppet', 'w_freddy', 'w_bonnie', 'w_chica', 'w_foxy'];
     const ABILITIES = {
-        guard: 'Sin puertas: MÁSCARA, LINTERNA, luces y la CAJA MUSICAL (juego ORIGINAL).',
-        toy_freddy: 'El escenario te ve: caminas despacio pero seguro hacia la oficina',
-        toy_bonnie: 'VENTANAS: te cuelas por los conductos de aire del este',
-        toy_chica: 'VENTANAS: te cuelas por los conductos de aire del oeste',
-        mangle: 'COLGANTE: te arrastras por el techo del comedor al comedor central',
-        bb: 'RISAS Y LUCES: apagas la linterna del guardia si entras (¡sin kill, pero cagas la noche!)',
-        puppet: 'LA CAJA MUSICAL: si el guardia la deja agotarse, SALES y nadie te para',
-        w_freddy: 'PESADO: más lento, pero tu ataque no se puede esconder con la máscara',
-        w_bonnie: 'TORMENTO: tu cara sin frente espanta por los pasillos',
-        w_chica: 'CAZUELAS: ruido de cocina que confunde al guardia',
-        w_foxy: 'FARO: si el guardia te alumbra de frente, retrocedes'
+        guard: 'Sin puertas: MÁSCARA, LINTERNA, luces, la CAJA MUSICAL y el ⚡ DESTELLO [F].',
+        toy_freddy: 'Q · FAROL: anuncias tu llegada a la oficina… sin estar ahí (banner falso)',
+        toy_bonnie: 'Q · INTERFERENCIA: llena de estática el monitor del guardia 3s',
+        toy_chica: 'Q · CUPCAKE: golpes metálicos que despistan al guardia 4s',
+        mangle: 'Q · RADIO ROTA: estática atronadora que drena 10% de su batería',
+        bb: 'Q · GLOBOS: lluvia de globos que BLOQUEA la cuerda de la caja 6s — y al entrar le ROBAS la linterna 40s',
+        puppet: 'Q · MELODÍA MISTERIOSA: la caja se agota el doble de rápido 8s — y si llega a 0, SALES y nadie te para',
+        w_freddy: 'Q · BURLA: tu sombra asoma en la oficina sin estar ahí',
+        w_bonnie: 'Q · TORMENTO: tu cara sin frente sabotea el monitor 3s',
+        w_chica: 'Q · CAZUELAS: ruido de cocina atronador 4s',
+        w_foxy: 'Q · SPRINT: corres el doble de rápido durante 6s'
     };
 
     const $ = (id) => document.getElementById(id);

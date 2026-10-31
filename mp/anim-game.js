@@ -34,12 +34,12 @@
     };
     const ROLE_INFO = ROLES[ROLE] || { name: ROLE, img: 'assets/roles/guard.png', color: '#999', marker: '?' };
 
-    // ------------------- Mapa -------------------
+    // ------------------- Mapa (cámaras CANON del FNAF 2) -------------------
     const ROOM_NAME = {
-        cam8: 'ALA NORTE', cam3: 'PASILLO OESTE', cam1: 'REFACCIONES', cam5: 'SALA OESTE',
-        cam7: 'COMEDOR', cam4: 'PASILLO CENTRAL', cam2: 'ÁREA DE JUEGOS', cam6: 'SALA SUR',
-        cam9: 'ESCUCHA SOLA', cam11: 'RINCÓN DE PREMIOS', cam10: 'SALA ESTE', cam12: 'CAVERNA DEL NIÑO',
-        hall1: 'PASILLO 1', hall2: 'PASILLO 2', office: 'OFICINA'
+        cam1: 'SALA DE FIESTAS 1', cam2: 'SALA DE FIESTAS 2', cam3: 'SALA DE FIESTAS 3', cam4: 'SALA DE FIESTAS 4',
+        cam5: 'CONDUCTO DE AIRE IZQ.', cam6: 'CONDUCTO DE AIRE DER.', cam7: 'PASILLO PRINCIPAL', cam8: 'REFACCIONES',
+        cam9: 'ESCENARIO', cam10: 'ÁREA DE JUEGOS', cam11: 'RINCÓN DE PREMIOS', cam12: 'CAVERNA DEL NIÑO',
+        hall1: 'PASILLO (TRAMO 1)', hall2: 'FRENTE A LA OFICINA', office: 'OFICINA'
     };
     const ADJACENCY = {
         cam8: ['cam3', 'cam7'],
@@ -58,10 +58,12 @@
         hall2: ['cam1', 'cam2', 'cam10', 'hall1', 'office'],
         office: ['hall2']
     };
+    // salas iniciales canon: toys en el escenario, withered en refacciones,
+    // BB en el área de juegos, mangle en su caverna, marioneta en premios
     const START_ROOM = {
-        toy_freddy: 'cam7', toy_bonnie: 'cam9', toy_chica: 'cam8',
-        mangle: 'cam12', bb: 'cam5', puppet: 'cam11',
-        w_freddy: 'cam1', w_bonnie: 'cam1', w_chica: 'cam1', w_foxy: 'cam3'
+        toy_freddy: 'cam9', toy_bonnie: 'cam9', toy_chica: 'cam9',
+        mangle: 'cam12', bb: 'cam10', puppet: 'cam11',
+        w_freddy: 'cam8', w_bonnie: 'cam8', w_chica: 'cam8', w_foxy: 'cam8'
     };
     // posiciones para el minimapa (layout geográfico del demo, en %)
     const MAP_POS = {
@@ -72,19 +74,36 @@
     };
     const MOVE_CD = ROLE === 'mangle' ? 5000 : 6000;
 
+    // ------------------- Habilidades [Q] por rol -------------------
+    const ABILITIES = {
+        toy_freddy: { name: 'FAROL', desc: 'banner falso de oficina' },
+        toy_bonnie: { name: 'INTERFERENCIA', desc: 'sabotea el monitor 3s' },
+        toy_chica: { name: 'CUPCAKE', desc: 'ruido metálico 4s' },
+        mangle: { name: 'RADIO ROTA', desc: 'estática: -10% batería' },
+        bb: { name: 'GLOBOS', desc: 'bloquea la cuerda 6s' },
+        puppet: { name: 'MELODÍA MISTERIOSA', desc: 'caja se agota 2x (8s)' },
+        w_freddy: { name: 'BURLA', desc: 'banner falso de oficina' },
+        w_bonnie: { name: 'TORMENTO', desc: 'sabotea el monitor 3s' },
+        w_chica: { name: 'CAZUELAS', desc: 'ruido atronador 4s' },
+        w_foxy: { name: 'SPRINT', desc: 'corres 2x rápido 6s' }
+    };
+    const SPECIAL_CD = 30000;
+
     // ------------------- Estado -------------------
     const S = {
         phase: 'connecting',     // connecting → waiting → night → dead → win
-        room: START_ROOM[ROLE] || 'cam1',
+        room: START_ROOM[ROLE] || 'cam8',
         night: 1,
         lastMove: 0,
         stunnedUntil: 0,
         inOffice: false,
-        boxLevel: 1,             // nivel de la caja musical (0..1)
+        boxLevel: 1,             // nivel de la caja musical (0..1, real del host)
         boxEmpty: false,
         players: [],
         client: null,
-        connected: false
+        connected: false,
+        lastSpecial: 0,          // [Q] cooldown local
+        moveCd: 6000
     };
     const NAV_ARROW = {
         cam8: { cam3: '↓', cam7: '→' },
@@ -113,6 +132,15 @@
         $('role-name').style.color = ROLE_INFO.color;
         $('role-player').textContent = NAME;
         document.title = 'FNAF 2 MP — ' + ROLE_INFO.name;
+        // habilidad [Q] única por rol
+        const ab = ABILITIES[ROLE];
+        if (ab) {
+            const q = $('ab-q');
+            q.style.display = 'inline-block';
+            $('ab-q-name').textContent = '[Q] ' + ab.name;
+            $('cd-q').textContent = ab.desc;
+            q.title = ab.desc;
+        }
         // la caja musical solo interesa a la marioneta (y al guardia)
         $('hb-box').style.display = ROLE === 'puppet' ? 'flex' : 'none';
         if (ROLE === 'puppet') $('ab-puppet').style.display = 'inline-block';
@@ -179,7 +207,7 @@
     function canMove() {
         if (S.phase !== 'night') return false;
         if (Date.now() < S.stunnedUntil) return false;
-        return Date.now() - S.lastMove >= MOVE_CD;
+        return Date.now() - S.lastMove >= (S.moveCd || MOVE_CD);
     }
     function tryMove(to) {
         if (!canMove()) return;
@@ -198,6 +226,17 @@
     function tryPuppetEscape() {
         if (ROLE !== 'puppet' || S.phase !== 'night') return;
         send({ t: 'puppetEscape' });
+    }
+
+    // ------------------- Habilidad [Q] -------------------
+    function trySpecial() {
+        if (S.phase !== 'night') return;
+        if (Date.now() < S.stunnedUntil) { toast('⚡ ¡Estás aturdido!'); return; }
+        if (Date.now() - S.lastSpecial < SPECIAL_CD) {
+            toast('⏳ ' + ABILITIES[ROLE].name + ' recargando ' + Math.ceil((SPECIAL_CD - (Date.now() - S.lastSpecial)) / 1000) + 's');
+            return;
+        }
+        send({ t: 'special' });
     }
 
     // ------------------- Red -------------------
@@ -220,15 +259,28 @@
         c.on('players', (m) => {
             S.players = m.players || [];
             S.night = m.night || S.night;
+            if (m.moveCd) S.moveCd = m.moveCd;
+            if (typeof m.boxPct === 'number') S.boxLevel = m.boxPct / 100;
             if (m.phase) S.phase = m.phase === 'night' && S.phase !== 'dead' ? 'night' : S.phase;
             paintMates();
             if (S.phase === 'night') { hideScreen(); renderAll(); }
         });
+        c.on('box', (m) => {
+            if (typeof m.pct === 'number') {
+                S.boxLevel = m.pct / 100;
+                if (m.pct > 20) S.boxEmpty = false;
+            }
+        });
+        c.on('boxRefilled', () => {
+            S.boxEmpty = false;
+            if (ROLE === 'puppet') toast('🎵 El guardia ha dado cuerda…', 2500);
+        });
         c.on('nightStart', (m) => {
             S.night = m.night || 1;
             S.phase = 'night';
-            S.room = START_ROOM[ROLE] || 'cam1';
+            S.room = START_ROOM[ROLE] || 'cam8';
             S.lastMove = Date.now();
+            S.lastSpecial = 0;
             hideScreen();
             renderAll();
             toast('🌙 NOCHE ' + S.night + ' — el guardia está en la oficina. ¡A cazar!');
@@ -260,6 +312,15 @@
                 renderAll();
                 toast('↩ Te retiras: ' + (m.reason || ''));
             }
+        });
+        c.on('specialOk', (m) => {
+            S.lastSpecial = Date.now();
+            toast('✴ ' + (m.name || 'Habilidad') + ' usada');
+            renderAll();
+        });
+        c.on('specialDeny', (m) => { toast('✖ ' + (m.why || 'habilidad no disponible')); });
+        c.on('specialFx', (m) => {
+            if (m.role !== ROLE && m.name) toast((ROLES[m.role] ? ROLES[m.role].name : m.role) + ' usó ' + m.name, 2500);
         });
         c.on('guardStun', (m) => {
             S.stunnedUntil = Date.now() + (m.ms || 5000);
@@ -324,29 +385,48 @@
         renderNav();
         $('cd-jump').textContent = S.inOffice ? (ROLE === 'bb' ? '¡roba y corre!' : '¡AHORA! antes de la máscara') : 'solo en la OFICINA';
         $('ab-jump').disabled = !S.inOffice || S.phase !== 'night';
+        // habilidad [Q]: recarga en vivo
+        const q = $('ab-q'), cdq = $('cd-q');
+        if (ABILITIES[ROLE]) {
+            const left = SPECIAL_CD - (Date.now() - S.lastSpecial);
+            q.disabled = S.phase !== 'night' || left > 0;
+            cdq.textContent = left > 0 ? 'recarga ' + Math.ceil(left / 1000) + 's' : ABILITIES[ROLE].desc;
+        }
     }
 
-    // ------------------- Caja musical (solo marioneta) -------------------
+    // ------------------- Caja musical (nivel REAL del host) -------------------
     function tickBox() {
         if (ROLE !== 'puppet') return;
-        // estimación local: drena ~15/s desde 2500 cuando el guardia NO la da cuerda
         const el = $('boxfill');
-        if (el) el.style.width = Math.max(0, Math.min(100, S.boxLevel * 100)) + '%';
+        if (el) {
+            const pct = Math.max(0, Math.min(100, S.boxLevel * 100));
+            el.style.width = pct + '%';
+            el.style.background = pct < 25 ? '#ff5b5b' : (pct < 50 ? '#ffb84d' : '#e8d6fe');
+        }
+        const hb = $('hb-box');
+        if (hb) hb.classList.toggle('danger', S.boxLevel < 0.25);
     }
     setInterval(tickBox, 500);
-    // el host informa el nivel real en 'players' (futuro); por ahora se drena local
-    setInterval(() => { if (S.phase === 'night' && ROLE === 'puppet' && !S.boxEmpty) { S.boxLevel = Math.max(0, S.boxLevel - 0.0075); } }, 500);
 
     // ------------------- Eventos UI -------------------
     $('ab-jump').addEventListener('click', tryJumpscare);
     $('ab-puppet').addEventListener('click', tryPuppetEscape);
+    $('ab-q').addEventListener('click', trySpecial);
     window.addEventListener('keydown', (e) => {
         if (e.code === 'Space') { e.preventDefault(); tryJumpscare(); }
         if (e.key === 'e' || e.key === 'E') tryPuppetEscape();
+        if (e.key === 'q' || e.key === 'Q') trySpecial();
     });
 
-    // refresco de botones por cooldown
-    setInterval(() => { if (S.phase === 'night') renderNav(); }, 500);
+    // refresco de botones por cooldown (nav + habilidad Q)
+    setInterval(() => { if (S.phase === 'night') { renderNav(); refreshQ(); } }, 500);
+    function refreshQ() {
+        if (!ABILITIES[ROLE]) return;
+        const q = $('ab-q'), cdq = $('cd-q');
+        const left = SPECIAL_CD - (Date.now() - S.lastSpecial);
+        q.disabled = S.phase !== 'night' || left > 0;
+        cdq.textContent = left > 0 ? 'recarga ' + Math.ceil(left / 1000) + 's' : ABILITIES[ROLE].desc;
+    }
     // reloj decorado
     setInterval(() => {
         if (S.phase !== 'night') return;
@@ -355,7 +435,7 @@
     }, 1000);
 
     // ------------------- Arranque -------------------
-    window.__A = { S, ROLES, ROOM_NAME, ADJACENCY, send, tryMove, tryJumpscare };
+    window.__A = { S, ROLES, ROOM_NAME, ADJACENCY, send, tryMove, tryJumpscare, trySpecial, ABILITIES };
     setRoleUI();
     buildMap();
     paintMap();
